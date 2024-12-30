@@ -3,17 +3,16 @@
 
 import torch
 import torch.nn.functional as F 
-import numpy as np 
-import math 
-
 from torch import nn
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import numpy as np
 
 class DETM(nn.Module):
     def __init__(self, args, embeddings):
         super(DETM, self).__init__()
 
+        self.device = args.device
+        self.batch_size = args.batch_size
+        
         ## define hyperparameters
         self.num_topics = args.num_topics
         self.num_times = args.num_times
@@ -37,7 +36,7 @@ class DETM(nn.Module):
             num_embeddings, emsize = embeddings.size()
             rho = nn.Embedding(num_embeddings, emsize)
             rho.weight.data = embeddings
-            self.rho = rho.weight.data.clone().float().to(device)
+            self.rho = rho.weight.data.clone().float().to(self.device)
 
         ## define the variational parameters for the topic embeddings over time (alpha) ... alpha is K x T x L
         self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.num_times, args.rho_size))
@@ -105,20 +104,20 @@ class DETM(nn.Module):
         return kl
 
     def get_alpha(self): ## mean field
-        alphas = torch.zeros(self.num_times, self.num_topics, self.rho_size).to(device)
+        alphas = torch.zeros(self.num_times, self.num_topics, self.rho_size).to(self.device)
         kl_alpha = []
 
         alphas[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
 
-        p_mu_0 = torch.zeros(self.num_topics, self.rho_size).to(device)
-        logsigma_p_0 = torch.zeros(self.num_topics, self.rho_size).to(device)
+        p_mu_0 = torch.zeros(self.num_topics, self.rho_size).to(self.device)
+        logsigma_p_0 = torch.zeros(self.num_topics, self.rho_size).to(self.device)
         kl_0 = self.get_kl(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :], p_mu_0, logsigma_p_0)
         kl_alpha.append(kl_0)
         for t in range(1, self.num_times):
             alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
             
             p_mu_t = alphas[t-1]
-            logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics, self.rho_size).to(device))
+            logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics, self.rho_size).to(self.device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
         kl_alpha = torch.stack(kl_alpha).sum()
@@ -130,16 +129,16 @@ class DETM(nn.Module):
         output, _ = self.q_eta(inp, hidden)
         output = output.squeeze()
 
-        etas = torch.zeros(self.num_times, self.num_topics).to(device)
+        etas = torch.zeros(self.num_times, self.num_topics).to(self.device)
         kl_eta = []
 
-        inp_0 = torch.cat([output[0], torch.zeros(self.num_topics,).to(device)], dim=0)
+        inp_0 = torch.cat([output[0], torch.zeros(self.num_topics,).to(self.device)], dim=0)
         mu_0 = self.mu_q_eta(inp_0)
         logsigma_0 = self.logsigma_q_eta(inp_0)
         etas[0] = self.reparameterize(mu_0, logsigma_0)
 
-        p_mu_0 = torch.zeros(self.num_topics,).to(device)
-        logsigma_p_0 = torch.zeros(self.num_topics,).to(device)
+        p_mu_0 = torch.zeros(self.num_topics,).to(self.device)
+        logsigma_p_0 = torch.zeros(self.num_topics,).to(self.device)
         kl_0 = self.get_kl(mu_0, logsigma_0, p_mu_0, logsigma_p_0)
         kl_eta.append(kl_0)
         for t in range(1, self.num_times):
@@ -149,7 +148,7 @@ class DETM(nn.Module):
             etas[t] = self.reparameterize(mu_t, logsigma_t)
 
             p_mu_t = etas[t-1]
-            logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(device))
+            logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
             kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
             kl_eta.append(kl_t)
         kl_eta = torch.stack(kl_eta).sum()
@@ -167,7 +166,7 @@ class DETM(nn.Module):
         logsigma_theta = self.logsigma_q_theta(q_theta)
         z = self.reparameterize(mu_theta, logsigma_theta)
         theta = F.softmax(z, dim=-1)
-        kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(device))
+        kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(self.device))
         return theta, kl_theta
 
     def get_beta(self, alpha):
@@ -213,3 +212,106 @@ class DETM(nn.Module):
         nlayers = self.eta_nlayers
         nhid = self.eta_hidden_size
         return (weight.new_zeros(nlayers, 1, nhid), weight.new_zeros(nlayers, 1, nhid))
+
+    def get_rnn_input(self, subdocs, id2token, window_counts, batch_size=32):
+        indices = torch.arange(0, len(subdocs), dtype=torch.int)
+        indices = torch.split(indices, batch_size)
+        rnn_input = torch.zeros(len(window_counts), len(id2token)).to(self.device)
+        cnt = torch.zeros(len(window_counts), ).to(self.device)
+        for idx, ind in enumerate(indices):
+            batch_size = len(ind)
+            data_batch = np.zeros((batch_size, len(id2token)))
+            times_batch = np.zeros((batch_size, ))
+            for i, doc_id in enumerate(ind):
+                #timestamp, yr, doc, title, author, _ =
+                window, subdoc = subdocs[doc_id]
+                times_batch[i] = window #subdoc["window"] #timestamp
+                for k, v in subdoc.items():
+                    data_batch[i, k] = v
+            data_batch = torch.from_numpy(data_batch).float().to(self.device)
+            times_batch = torch.from_numpy(times_batch).to(self.device)
+            for t in range(len(window_counts)):
+                tmp = (times_batch == t).nonzero()
+                docs = data_batch[tmp].squeeze().sum(0)
+                rnn_input[t] += docs
+                cnt[t] += len(tmp)
+        rnn_input = rnn_input / cnt.unsqueeze(1)
+        return rnn_input
+
+
+    
+
+def get_theta(model, eta, bows):
+    model.eval()
+    with torch.no_grad():
+        inp = torch.cat([bows, eta], dim=1)
+        q_theta = model.q_theta(inp)
+        mu_theta = model.mu_q_theta(q_theta)
+        theta = torch.nn.functional.softmax(mu_theta, dim=-1)
+        return theta    
+
+
+
+def _eta_helper(model, rnn_inp, device):
+    inp = model.q_eta_map(rnn_inp).unsqueeze(1)
+    hidden = model.init_hidden()
+    output, _ = model.q_eta(inp, hidden)
+    output = output.squeeze()
+    etas = torch.zeros(model.num_times, model.num_topics).to(device)
+    inp_0 = torch.cat([output[0], torch.zeros(model.num_topics,).to(device)], dim=0)
+    etas[0] = model.mu_q_eta(inp_0)
+    for t in range(1, model.num_times):
+        inp_t = torch.cat([output[t], etas[t-1]], dim=0)
+        etas[t] = model.mu_q_eta(inp_t)
+    return etas
+
+def get_eta(model, rnn_inp, device):
+    model.eval()
+    with torch.no_grad():
+        return _eta_helper(model, rnn_inp, device)
+
+
+def get_completion_ppl(model, val_subdocs, val_rnn_inp, id2token, device):
+    """Returns document completion perplexity.
+    """
+
+    model.eval()
+    with torch.no_grad():
+        alpha = model.mu_q_alpha
+        acc_loss = 0.0
+        cnt = 0
+        val_batch_size = 1000
+        eta = get_eta(model, val_rnn_inp, device)
+        indices = torch.split(torch.tensor(range(len(val_subdocs))), val_batch_size)
+        for idx, ind in enumerate(indices):
+            batch_size = len(ind)
+            data_batch = np.zeros((batch_size, len(id2token)))
+            times_batch = np.zeros((batch_size, ))
+            for i, doc_id in enumerate(ind):
+                tm, subdoc = val_subdocs[doc_id]
+                times_batch[i] = tm #subdoc["window"] #timestamp
+                for k, v in subdoc.items():
+                    data_batch[i, k] = v
+            data_batch = torch.from_numpy(data_batch).float().to(device)
+            times_batch = torch.from_numpy(times_batch).to(device)
+
+            sums = data_batch.sum(1).unsqueeze(1)
+            normalized_data_batch = data_batch / sums
+
+            
+            eta_td = eta[times_batch.type('torch.LongTensor')]
+            theta = get_theta(model, eta_td, normalized_data_batch)
+            alpha_td = alpha[:, times_batch.type('torch.LongTensor'), :]
+            beta = model.get_beta(alpha_td).permute(1, 0, 2)
+            loglik = theta.unsqueeze(2) * beta
+            loglik = loglik.sum(1)
+            loglik = torch.log(loglik)
+            nll = -loglik * data_batch
+            nll = nll.sum(-1)
+            loss = nll / sums.squeeze()
+            loss = loss.mean().item()
+            acc_loss += loss
+            cnt += 1
+        cur_loss = acc_loss / cnt
+        ppl_all = round(math.exp(cur_loss), 1)
+    return ppl_all
