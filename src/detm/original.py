@@ -1,63 +1,91 @@
 """This file defines a dynamic etm object.
 """
-
+import math
 import torch
 import torch.nn.functional as F 
 from torch import nn
-import numpy as np
+import numpy
+
 
 class DETM(nn.Module):
-    def __init__(self, args, embeddings):
+    def __init__(
+            self,
+            num_topics,
+            min_time,
+            max_time,
+            word_list,
+            embeddings,
+            t_hidden_size=800,
+            eta_hidden_size=200,
+            enc_drop=0.0,
+            eta_dropout=0.0,
+            eta_nlayers=3,
+            delta=0.005,
+            window_size=None,
+            train_embeddings=False,
+            theta_act="relu",
+            batch_size=32,
+            device="cpu"
+    ):
         super(DETM, self).__init__()
 
-        self.device = args.device
-        self.batch_size = args.batch_size
+        self.device = device
+        self.batch_size = batch_size
+        self.word_list = word_list
         
         ## define hyperparameters
-        self.num_topics = args.num_topics
-        self.num_times = args.num_times
-        self.vocab_size = args.vocab_size
-        self.t_hidden_size = args.t_hidden_size
-        self.eta_hidden_size = args.eta_hidden_size
-        self.rho_size = args.rho_size
-        self.emsize = args.emb_size
-        self.enc_drop = args.enc_drop
-        self.eta_nlayers = args.eta_nlayers
-        self.t_drop = nn.Dropout(args.enc_drop)
-        self.delta = args.delta
-        self.train_embeddings = args.train_embeddings
+        self.num_topics = num_topics
+        self.max_time = max_time
+        self.min_time = min_time
+        self.window_size = window_size
+        self.num_windows = math.ceil((max_time - min_time) / window_size)
+        self.t_hidden_size = t_hidden_size
+        self.eta_hidden_size = eta_hidden_size
 
-        self.theta_act = self.get_activation(args.theta_act)
+        self.enc_drop = enc_drop
+        self.eta_nlayers = eta_nlayers
+        self.t_drop = nn.Dropout(enc_drop)
+        self.delta = delta
+        self.train_embeddings = train_embeddings
+        self.theta_act = self.get_activation(theta_act)
 
-        ## define the word embedding matrix \rho
-        if args.train_embeddings:
-            self.rho = nn.Linear(args.rho_size, args.vocab_size, bias=False)
-        else:
-            num_embeddings, emsize = embeddings.size()
-            rho = nn.Embedding(num_embeddings, emsize)
-            rho.weight.data = embeddings
-            self.rho = rho.weight.data.clone().float().to(self.device)
-
+        
+        rho_data = numpy.array([embeddings.wv[w] for w in self.word_list])
+        num_embeddings, emsize = rho_data.shape
+        self.emsize = emsize
+        self.rho_size = self.emsize
+        
+        rho = nn.Embedding(num_embeddings, self.emsize)
+        rho.weight.data = torch.tensor(rho_data)
+        self.rho = rho.weight.data.clone().float().to(self.device)
+        
         ## define the variational parameters for the topic embeddings over time (alpha) ... alpha is K x T x L
-        self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.num_times, args.rho_size))
-        self.logsigma_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.num_times, args.rho_size))
+        self.mu_q_alpha = nn.Parameter(torch.randn(num_topics, self.num_windows, self.rho_size))
+        self.logsigma_q_alpha = nn.Parameter(torch.randn(num_topics, self.num_windows, self.rho_size))
     
         ## define variational distribution for \theta_{1:D} via amortizartion... theta is K x D
         self.q_theta = nn.Sequential(
-                    nn.Linear(args.vocab_size+args.num_topics, args.t_hidden_size), 
+                    nn.Linear(self.vocab_size+num_topics, t_hidden_size), 
                     self.theta_act,
-                    nn.Linear(args.t_hidden_size, args.t_hidden_size),
+                    nn.Linear(t_hidden_size, t_hidden_size),
                     self.theta_act,
                 )
-        self.mu_q_theta = nn.Linear(args.t_hidden_size, args.num_topics, bias=True)
-        self.logsigma_q_theta = nn.Linear(args.t_hidden_size, args.num_topics, bias=True)
+        self.mu_q_theta = nn.Linear(t_hidden_size, num_topics, bias=True)
+        self.logsigma_q_theta = nn.Linear(t_hidden_size, num_topics, bias=True)
 
         ## define variational distribution for \eta via amortizartion... eta is K x T
-        self.q_eta_map = nn.Linear(args.vocab_size, args.eta_hidden_size)
-        self.q_eta = nn.LSTM(args.eta_hidden_size, args.eta_hidden_size, args.eta_nlayers, dropout=args.eta_dropout)
-        self.mu_q_eta = nn.Linear(args.eta_hidden_size+args.num_topics, args.num_topics, bias=True)
-        self.logsigma_q_eta = nn.Linear(args.eta_hidden_size+args.num_topics, args.num_topics, bias=True)
+        self.q_eta_map = nn.Linear(self.vocab_size, eta_hidden_size)
+        self.q_eta = nn.LSTM(eta_hidden_size, eta_hidden_size, eta_nlayers, dropout=eta_dropout)
+        self.mu_q_eta = nn.Linear(eta_hidden_size+num_topics, num_topics, bias=True)
+        self.logsigma_q_eta = nn.Linear(eta_hidden_size+num_topics, num_topics, bias=True)
 
+    def represent_time(self, time):
+        return int((time - self.min_time) / self.window_size)
+        
+    @property
+    def vocab_size(self):
+        return self.rho.shape[0]
+        
     def get_activation(self, act):
         if act == 'tanh':
             act = nn.Tanh()
@@ -104,7 +132,7 @@ class DETM(nn.Module):
         return kl
 
     def get_alpha(self): ## mean field
-        alphas = torch.zeros(self.num_times, self.num_topics, self.rho_size).to(self.device)
+        alphas = torch.zeros(self.num_windows, self.num_topics, self.rho_size).to(self.device)
         kl_alpha = []
 
         alphas[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
@@ -113,7 +141,7 @@ class DETM(nn.Module):
         logsigma_p_0 = torch.zeros(self.num_topics, self.rho_size).to(self.device)
         kl_0 = self.get_kl(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :], p_mu_0, logsigma_p_0)
         kl_alpha.append(kl_0)
-        for t in range(1, self.num_times):
+        for t in range(1, self.num_windows):
             alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
             
             p_mu_t = alphas[t-1]
@@ -129,54 +157,62 @@ class DETM(nn.Module):
         output, _ = self.q_eta(inp, hidden)
         output = output.squeeze()
 
-        etas = torch.zeros(self.num_times, self.num_topics).to(self.device)
+        etas = torch.zeros(self.num_windows, self.num_topics).to(self.device)
         kl_eta = []
 
         inp_0 = torch.cat([output[0], torch.zeros(self.num_topics,).to(self.device)], dim=0)
         mu_0 = self.mu_q_eta(inp_0)
-        logsigma_0 = self.logsigma_q_eta(inp_0)
-        etas[0] = self.reparameterize(mu_0, logsigma_0)
+        if self.training:
+            logsigma_0 = self.logsigma_q_eta(inp_0)
+            etas[0] = self.reparameterize(mu_0, logsigma_0)
 
-        p_mu_0 = torch.zeros(self.num_topics,).to(self.device)
-        logsigma_p_0 = torch.zeros(self.num_topics,).to(self.device)
-        kl_0 = self.get_kl(mu_0, logsigma_0, p_mu_0, logsigma_p_0)
-        kl_eta.append(kl_0)
-        for t in range(1, self.num_times):
+            p_mu_0 = torch.zeros(self.num_topics,).to(self.device)
+            logsigma_p_0 = torch.zeros(self.num_topics,).to(self.device)
+            kl_0 = self.get_kl(mu_0, logsigma_0, p_mu_0, logsigma_p_0)
+            kl_eta.append(kl_0)
+        else:
+            etas[0] = mu_0
+        for t in range(1, self.num_windows):
             inp_t = torch.cat([output[t], etas[t-1]], dim=0)
             mu_t = self.mu_q_eta(inp_t)
-            logsigma_t = self.logsigma_q_eta(inp_t)
-            etas[t] = self.reparameterize(mu_t, logsigma_t)
+            if self.training:
+                logsigma_t = self.logsigma_q_eta(inp_t)
+                etas[t] = self.reparameterize(mu_t, logsigma_t)
 
-            p_mu_t = etas[t-1]
-            logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
-            kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
-            kl_eta.append(kl_t)
-        kl_eta = torch.stack(kl_eta).sum()
-        return etas, kl_eta
-
+                p_mu_t = etas[t-1]
+                logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
+                kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
+                kl_eta.append(kl_t)
+            else:
+                etas[t] = mu_t
+        if self.training:
+            kl_eta = torch.stack(kl_eta).sum()
+            return etas, kl_eta
+        else:
+            return etas, None
+    
     def get_theta(self, eta, bows, times): ## amortized inference
         """Returns the topic proportions.
         """
         eta_td = eta[times.type('torch.LongTensor')]
         inp = torch.cat([bows, eta_td], dim=1)
         q_theta = self.q_theta(inp)
-        if self.enc_drop > 0:
+        if self.enc_drop > 0 and self.training:
             q_theta = self.t_drop(q_theta)
         mu_theta = self.mu_q_theta(q_theta)
+        if not self.training:
+            return torch.nn.functional.softmax(mu_theta, dim=-1), None
         logsigma_theta = self.logsigma_q_theta(q_theta)
         z = self.reparameterize(mu_theta, logsigma_theta)
         theta = F.softmax(z, dim=-1)
         kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(self.device))
         return theta, kl_theta
-
+    
     def get_beta(self, alpha):
         """Returns the topic matrix \beta of shape K x V
         """
-        if self.train_embeddings:
-            logit = self.rho(alpha.view(alpha.size(0)*alpha.size(1), self.rho_size))
-        else:
-            tmp = alpha.view(alpha.size(0)*alpha.size(1), self.rho_size)
-            logit = torch.mm(tmp, self.rho.permute(1, 0)) 
+        tmp = alpha.view(alpha.size(0)*alpha.size(1), self.rho_size)
+        logit = torch.mm(tmp, self.rho.permute(1, 0)) 
         logit = logit.view(alpha.size(0), alpha.size(1), -1)
         beta = F.softmax(logit, dim=-1)
         return beta 
@@ -188,9 +224,15 @@ class DETM(nn.Module):
         loglik = torch.log(loglik+1e-6)
         nll = -loglik * bows
         nll = nll.sum(-1)
-        return nll  
-
+        return nll
+    
     def forward(self, bows, normalized_bows, times, rnn_inp, num_docs):
+        
+        bows = bows.to(self.device)
+        normalized_bows = normalized_bows.to(self.device)
+        times = times.to(self.device)
+        rnn_inp = rnn_inp.to(self.device)
+
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz 
         alpha, kl_alpha = self.get_alpha()
@@ -213,24 +255,25 @@ class DETM(nn.Module):
         nhid = self.eta_hidden_size
         return (weight.new_zeros(nlayers, 1, nhid), weight.new_zeros(nlayers, 1, nhid))
 
-    def get_rnn_input(self, subdocs, id2token, window_counts, batch_size=32):
+    def get_rnn_input(self, subdocs, times, batch_size=32):        
+        window_count = self.num_windows
         indices = torch.arange(0, len(subdocs), dtype=torch.int)
         indices = torch.split(indices, batch_size)
-        rnn_input = torch.zeros(len(window_counts), len(id2token)).to(self.device)
-        cnt = torch.zeros(len(window_counts), ).to(self.device)
+        rnn_input = torch.zeros(window_count, self.vocab_size).to(self.device)
+        cnt = torch.zeros(window_count, ).to(self.device)
         for idx, ind in enumerate(indices):
             batch_size = len(ind)
-            data_batch = np.zeros((batch_size, len(id2token)))
-            times_batch = np.zeros((batch_size, ))
+            data_batch = numpy.zeros((batch_size, self.vocab_size))
+            times_batch = numpy.zeros((batch_size, ))
             for i, doc_id in enumerate(ind):
-                #timestamp, yr, doc, title, author, _ =
-                window, subdoc = subdocs[doc_id]
-                times_batch[i] = window #subdoc["window"] #timestamp
+                subdoc = subdocs[doc_id]
+                window = times[doc_id]
+                times_batch[i] = window
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
             data_batch = torch.from_numpy(data_batch).float().to(self.device)
             times_batch = torch.from_numpy(times_batch).to(self.device)
-            for t in range(len(window_counts)):
+            for t in range(window_count):
                 tmp = (times_batch == t).nonzero()
                 docs = data_batch[tmp].squeeze().sum(0)
                 rnn_input[t] += docs
@@ -238,80 +281,53 @@ class DETM(nn.Module):
         rnn_input = rnn_input / cnt.unsqueeze(1)
         return rnn_input
 
+    def get_completion_ppl(self, val_subdocs, val_times, val_rnn_inp, device, batch_size=128):
+        """Returns document completion perplexity.
+        """
+
+        self.eval()
+        with torch.no_grad():
+            alpha = self.mu_q_alpha
+            acc_loss = 0.0
+            cnt = 0
+            eta, _ = self.get_eta(val_rnn_inp)
+            indices = torch.split(torch.tensor(range(len(val_subdocs))), batch_size)
+            for idx, ind in enumerate(indices):
+                batch_size = len(ind)
+                data_batch = numpy.zeros((batch_size, self.vocab_size))
+                times_batch = numpy.zeros((batch_size, ))
+                for i, doc_id in enumerate(ind):
+                    subdoc = val_subdocs[doc_id]
+                    tm = val_times[doc_id]
+                    times_batch[i] = tm
+                    for k, v in subdoc.items():
+                        data_batch[i, k] = v
+                data_batch = torch.from_numpy(data_batch).float().to(device)
+                times_batch = torch.from_numpy(times_batch).to(device)
+
+                sums = data_batch.sum(1).unsqueeze(1)
+                normalized_data_batch = data_batch / sums
+
+
+                eta_td = eta[times_batch.type('torch.LongTensor')]
+                theta, _ = self.get_theta(eta_td, normalized_data_batch, times_batch)
+                alpha_td = alpha[:, times_batch.type('torch.LongTensor'), :]
+                beta = self.get_beta(alpha_td).permute(1, 0, 2)
+                loglik = theta.unsqueeze(2) * beta
+                loglik = loglik.sum(1)
+                loglik = torch.log(loglik)
+                nll = -loglik * data_batch
+                nll = nll.sum(-1)
+                loss = nll / sums.squeeze()
+                loss = loss.mean().item()
+                acc_loss += loss
+                cnt += 1
+            cur_loss = acc_loss / cnt
+            ppl_all = round(math.exp(cur_loss), 1)
+        return ppl_all
 
     
 
-def get_theta(model, eta, bows):
-    model.eval()
-    with torch.no_grad():
-        inp = torch.cat([bows, eta], dim=1)
-        q_theta = model.q_theta(inp)
-        mu_theta = model.mu_q_theta(q_theta)
-        theta = torch.nn.functional.softmax(mu_theta, dim=-1)
-        return theta    
 
 
 
-def _eta_helper(model, rnn_inp, device):
-    inp = model.q_eta_map(rnn_inp).unsqueeze(1)
-    hidden = model.init_hidden()
-    output, _ = model.q_eta(inp, hidden)
-    output = output.squeeze()
-    etas = torch.zeros(model.num_times, model.num_topics).to(device)
-    inp_0 = torch.cat([output[0], torch.zeros(model.num_topics,).to(device)], dim=0)
-    etas[0] = model.mu_q_eta(inp_0)
-    for t in range(1, model.num_times):
-        inp_t = torch.cat([output[t], etas[t-1]], dim=0)
-        etas[t] = model.mu_q_eta(inp_t)
-    return etas
-
-def get_eta(model, rnn_inp, device):
-    model.eval()
-    with torch.no_grad():
-        return _eta_helper(model, rnn_inp, device)
-
-
-def get_completion_ppl(model, val_subdocs, val_rnn_inp, id2token, device):
-    """Returns document completion perplexity.
-    """
-
-    model.eval()
-    with torch.no_grad():
-        alpha = model.mu_q_alpha
-        acc_loss = 0.0
-        cnt = 0
-        val_batch_size = 1000
-        eta = get_eta(model, val_rnn_inp, device)
-        indices = torch.split(torch.tensor(range(len(val_subdocs))), val_batch_size)
-        for idx, ind in enumerate(indices):
-            batch_size = len(ind)
-            data_batch = np.zeros((batch_size, len(id2token)))
-            times_batch = np.zeros((batch_size, ))
-            for i, doc_id in enumerate(ind):
-                tm, subdoc = val_subdocs[doc_id]
-                times_batch[i] = tm #subdoc["window"] #timestamp
-                for k, v in subdoc.items():
-                    data_batch[i, k] = v
-            data_batch = torch.from_numpy(data_batch).float().to(device)
-            times_batch = torch.from_numpy(times_batch).to(device)
-
-            sums = data_batch.sum(1).unsqueeze(1)
-            normalized_data_batch = data_batch / sums
-
-            
-            eta_td = eta[times_batch.type('torch.LongTensor')]
-            theta = get_theta(model, eta_td, normalized_data_batch)
-            alpha_td = alpha[:, times_batch.type('torch.LongTensor'), :]
-            beta = model.get_beta(alpha_td).permute(1, 0, 2)
-            loglik = theta.unsqueeze(2) * beta
-            loglik = loglik.sum(1)
-            loglik = torch.log(loglik)
-            nll = -loglik * data_batch
-            nll = nll.sum(-1)
-            loss = nll / sums.squeeze()
-            loss = loss.mean().item()
-            acc_loss += loss
-            cnt += 1
-        cur_loss = acc_loss / cnt
-        ppl_all = round(math.exp(cur_loss), 1)
-    return ppl_all

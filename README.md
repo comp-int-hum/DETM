@@ -24,6 +24,72 @@ cd /path/to/project/using/detm
 pip install -e /path/back/to/DETM
 ```
 
+If you have gzipped JSONL data where each line/object is a document with a text field "content" and time field "year", you can use the library somewhat like this:
+
+```
+from detm import DETM, Corpus, train_embeddings, filter_embeddings
+
+corpus = Corpus()
+
+with gzip.open("my_data.jsonl.gz", "rt") as ifd:
+    for line in enumerate(ifd):
+        corpus.append(json.loads(line)
+
+embeddings = train_embeddings(corpus)
+
+subdocs, times, word_list = corpus.get_filtered_subdocs(
+    max_subdoc_length=500,
+    content_field="content",
+    time_field="year",
+    min_word_count=10,
+    max_word_proportion=0.7,
+    lowercase=True
+)
+
+filtered_embeddings = filter_embeddings(embeddings, word_list)
+
+model = DETM(
+    num_topics=50
+    min_time=min(times),
+    max_time=max(times),
+    window_size=25,
+    embeddings=filtered_embeddings,
+    device="cuda"
+)
+
+model.to(args.device)
+
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.016,
+    weight_decay=1.2e-6
+)
+
+best_state = train_model(
+    model=model,
+    subdocs=subdocs,
+    times=times,
+    optimizer=optimizer,
+    max_epochs=10,
+    device="cuda"
+)
+
+model.load_state_dict(best_state)
+
+test_perplexity = perplexity_on_corpus(
+    model,
+    some_other_corpus,
+    max_subdoc_length=500,
+    content_field="content",
+    time_field="year",
+    lowercase=True,
+    device="cuda"
+)
+
+
+print(test_perplexity)
+```
+
 Everything up to the point of our initial fork should be attributed to:
 
 ```

@@ -1,102 +1,127 @@
 import math
-import numpy
+import logging
 import re
+import numpy
 
-class Corpus(object):
+
+logger = logging.getLogger("corpus")
+
+
+class Corpus(list):
     """
     
     """
-    
-    def __init__(self, text_field, time_field, max_subdoc_length, lowercase=False):
-        self.text_field = text_field
-        self.time_field = time_field
-        self.max_subdoc_length = max_subdoc_length
-        self.lowercase = lowercase
-        self.subdocs = []
-        self.token_count = {}
-        self.time_count = {}
-        self.metadata = []
-        self.token_in_subdoc_count = {}
         
-    def add_doc(self, item, val=False):
-        time = float(item[self.time_field])
-        if numpy.isnan(time):
-            return
-        self.metadata.append({k : v for k, v in item.items() if k != self.text_field})
-        for subdoc in self._split(item[self.text_field]):
-            self.time_count[time] = self.time_count.get(time, 0) + 1
-            for t in subdoc:
-                self.token_count[t] = self.token_count.get(t, 0) + 1
-            for t in set(subdoc):
-                self.token_in_subdoc_count[t] = self.token_in_subdoc_count.get(t, 0) + 1
-            self.subdocs.append((len(self.metadata) - 1, subdoc))
-
-    def _split(self, text):
-        tokens = self._tokenize(self._normalize(text))
-        num_subdocs = math.ceil(len(tokens) / self.max_subdoc_length)
+    def _split(self, text, max_subdoc_length, lowercase):
+        tokens = re.split(r"\s+", text.lower() if lowercase else text)
+        num_subdocs = math.ceil(len(tokens) / max_subdoc_length)
         retval = []
         for i in range(num_subdocs):
-            retval.append(tokens[i * self.max_subdoc_length : (i + 1) * self.max_subdoc_length])
+            retval.append(tokens[i * max_subdoc_length : (i + 1) * max_subdoc_length])
         return retval
 
-    def _tokenize(self, text):
-        return re.split(r"\s+", text)
+    def filter_for_model(
+            self,
+            model,
+            max_subdoc_length,
+            content_field,
+            time_field=None,
+            lowercase=True
+    ):
+        subdocs = []
+        times = []
+        word_to_id = {w : i for i, w in enumerate(model.word_list)}
+        for doc in self:
+            if time_field != None:
+                time = doc.get(time_field, None)
+                if time != None and not numpy.isnan(time):
+                    time = float(time)                    
+                    #unique_times.add(time)
+                else:
+                    dropped_because_timeless += 1
+                    continue
 
-    def _normalize(self, text):
-        return text if isinstance(text, list) or not self.lowercase else text.lower()
-
-    def get_vocab(self, min_count=0, max_proportion=1.0):
-        vocab = {}
-        for k, v in self.token_in_subdoc_count.items():
-            if v >= min_count and v / len(self.subdocs) <= max_proportion:
-                vocab[k] = len(vocab)
-        return vocab
+            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+                subdoc = {}
+                for t in subdoc_tokens:
+                    if t in word_to_id:
+                        subdoc[word_to_id[t]] = subdoc.get(word_to_id[t], 0) + 1
+                if len(subdoc) > 0:
+                    subdocs.append(subdoc)
+                    times.append(time)
+                else:
+                    dropped_because_empty += 1
+        return (subdocs, times)
     
-    def get_filtered_subdocs(self, vocab, window_size=None):
-        if window_size:
-            window_counts = self.window_counts(window_size)
+    def get_filtered_subdocs(
+            self,
+            max_subdoc_length,
+            content_field,
+            time_field=None,
+            min_word_count=1,
+            max_word_proportion=1.0,
+            lowercase=True,
+    ):
+        
+        word_subdoc_count = {}
+        subdoc_count = 0
+        for doc in self:
+            if time_field != None:
+                time = doc.get(time_field, None)
+                if time != None and not numpy.isnan(time):
+                    time = float(time)
+                else:
+                    continue # a time field was specified, but this doc has no value for it
 
-        retval = []
-        for i, sd in self.subdocs:
-            tm = self.metadata[i][self.time_field]
-            subdoc = {}
-            for t in sd:
-                if t in vocab:
-                    subdoc[vocab[t]] = subdoc.get(vocab[t], 0) + 1
-            retval.append(
-                (
-                    self.time2window[tm] if window_size else tm,
-                    subdoc
-                )
-            )
-        return retval
+            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+                for w in set(subdoc_tokens):
+                    word_subdoc_count[w] = word_subdoc_count.get(w, 0) + 1
+                subdoc_count += 1
 
-    @property
-    def min_time(self):
-        return min(self.time_count.keys())
+        word_to_id = {}
+        for k, v in word_subdoc_count.items():
+            if v >= min_word_count and v / subdoc_count <= max_word_proportion:
+                word_to_id[k] = len(word_to_id)
 
-    @property
-    def max_time(self):
-        return max(self.time_count.keys())
+        unique_times = set()
+        unique_tokens = set()
+        subdocs = []
+        times = []
+        dropped_because_empty = 0
+        dropped_because_timeless = 0
+        for doc in self:
+            if time_field != None:
+                time = doc.get(time_field, None)
+                if time != None and not numpy.isnan(time):
+                    time = float(time)                    
+                    unique_times.add(time)
+                else:
+                    dropped_because_timeless += 1
+                    continue
 
-    @property
-    def span(self):
-        return self.max_time - self.min_time
-    
-    def window_counts(self, window_size):
-        self.time2window = {}
-        window_counts = {}
-        cur_max_time = self.min_time
-        cur_min_time = self.min_time        
-        sorted_times = list(sorted(self.time_count.items()))
-        for i in range(math.ceil(self.span / window_size)):
-            cur_max_time += window_size
-            j = 0
-            while j < len(sorted_times) and sorted_times[j][0] < cur_max_time:
-                self.time2window[sorted_times[j][0]] = i
-                key = (cur_min_time, cur_max_time)
-                window_counts[i] = window_counts.get(i, 0) + sorted_times[j][1]
-                j += 1
-            sorted_times = sorted_times[j:]
-            cur_min_time = cur_max_time
-        return window_counts
+            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+                subdoc = {}
+                for t in subdoc_tokens:
+                    if t in word_to_id:
+                        subdoc[word_to_id[t]] = subdoc.get(word_to_id[t], 0) + 1
+                if len(subdoc) > 0:
+                    subdocs.append(subdoc)
+                    times.append(time)
+                else:
+                    dropped_because_empty += 1
+        
+        if time_field != None and dropped_because_timeless > 0:
+            logger.info("Dropped %d documents with no time values", dropped_because_timeless)
+
+        if dropped_because_empty > 0:
+            logger.info("Dropped %d subdocs because empty or all tokens were filtered", dropped_because_empty)
+
+        logger.info(
+            "Split %d docs into %d subdocs with %d unique times and a vocabulary of %d words",
+            len(self),
+            len(subdocs),
+            len(unique_times),
+            len(word_to_id)
+        )
+
+        return (subdocs, times, [t for _, t in sorted([(i, w) for w, i in word_to_id.items()])])
