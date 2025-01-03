@@ -35,7 +35,7 @@ with gzip.open("my_data.jsonl.gz", "rt") as ifd:
     for line in enumerate(ifd):
         corpus.append(json.loads(line)
 
-embeddings = train_embeddings(corpus)
+embeddings = train_embeddings(corpus, content_field="content", max_subdoc_length=500, lowercase=True)
 
 subdocs, times, word_list = corpus.get_filtered_subdocs(
     max_subdoc_length=500,

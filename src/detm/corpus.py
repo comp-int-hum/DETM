@@ -90,6 +90,7 @@ class Corpus(list):
         dropped_because_empty = 0
         dropped_because_timeless = 0
         for doc in self:
+            time = None
             if time_field != None:
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
