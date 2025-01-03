@@ -4,19 +4,19 @@ This repository is derived from [the Blei lab's DETM code base](https://github.c
 
 This package can be installed from git:
 
-```
+```bash
 pip install git+https://github.com/comp-int-hum/DETM.git
 ```
 
 If you have your own branch, you can install that:
 
-```
+```bash
 pip install git+https://github.com/comp-int-hum/DETM.git@mybranch
 ```
 
 If you're working on the library itself, it's probably easiest to clone and check out your branch, and then install it in "editing mode" where you're using/testing it, so you don't need to keep reinstalling after changes:
 
-```
+```bash
 git clone https://github.com/comp-int-hum/DETM.git
 cd DETM
 git checkout mybranch
@@ -26,7 +26,7 @@ pip install -e /path/back/to/DETM
 
 If you have gzipped JSONL data where each line/object is a document with a text field "content" and time field "year", you can use the library somewhat like this:
 
-```
+```python
 from detm import DETM, Corpus, train_embeddings, filter_embeddings
 
 corpus = Corpus()
@@ -46,18 +46,17 @@ subdocs, times, word_list = corpus.get_filtered_subdocs(
     lowercase=True
 )
 
-filtered_embeddings = filter_embeddings(embeddings, word_list)
-
 model = DETM(
     num_topics=50
     min_time=min(times),
     max_time=max(times),
     window_size=25,
-    embeddings=filtered_embeddings,
+    word_list=word_list,
+    embeddings=embeddings,
     device="cuda"
 )
 
-model.to(args.device)
+model.to("cuda")
 
 optimizer = torch.optim.Adam(
     model.parameters(),
@@ -85,7 +84,6 @@ test_perplexity = perplexity_on_corpus(
     lowercase=True,
     device="cuda"
 )
-
 
 print(test_perplexity)
 ```
