@@ -113,6 +113,8 @@ def train_model(
                 val_ppl
             )
         )
+            
+        
 
         if best_val_ppl == None or val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
@@ -127,10 +129,13 @@ def train_model(
             optimizer.param_groups[0]['lr'] /= lr_factor
             model.load_state_dict(best_state)
             since_annealing = 0
+        elif numpy.isnan(val_ppl):
+            logger.error("Perplexity was NaN: something has probably gone wrong, stopping early...")
+            break
         elif since_improvement >= 10:
             break
 
-    return copy.deepcopy(model.state_dict())
+    return best_state
 
 
 def perplexity_on_corpus(
