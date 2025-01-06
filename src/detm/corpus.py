@@ -31,6 +31,8 @@ class Corpus(list):
         subdocs = []
         times = []
         word_to_id = {w : i for i, w in enumerate(model.word_list)}
+        dropped_because_empty = 0
+        dropped_because_timeless = 0
         for doc in self:
             if time_field != None:
                 time = doc.get(time_field, None)
@@ -52,7 +54,19 @@ class Corpus(list):
                 else:
                     dropped_because_empty += 1
         return (subdocs, times)
-    
+
+    def get_tokenized_subdocs(
+            self,
+            max_subdoc_length,
+            content_field,
+            lowercase=True,
+    ):
+        retval = []
+        for doc in self:
+            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+                retval.append(subdoc_tokens)
+        return retval
+        
     def get_filtered_subdocs(
             self,
             max_subdoc_length,

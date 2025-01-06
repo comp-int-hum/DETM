@@ -3,6 +3,7 @@ import logging
 import random
 import torch
 import numpy
+from torch import autograd
 
 
 logger = logging.getLogger("utils")
@@ -70,24 +71,25 @@ def train_model(
             times_batch = torch.from_numpy(times_batch)
             sums = data_batch.sum(1).unsqueeze(1)
             normalized_data_batch = data_batch / sums
-            loss, nll, kl_alpha, kl_eta, kl_theta = model(
-                data_batch,
-                normalized_data_batch,
-                times_batch,
-                train_rnn_input,
-                len(train_docs),
-            )
-            if not torch.any(torch.isnan(loss)):
+            with autograd.set_detect_anomaly(False):
+
+                loss, nll, kl_alpha, kl_eta, kl_theta = model(
+                    data_batch,
+                    normalized_data_batch,
+                    times_batch,
+                    train_rnn_input,
+                    len(train_docs),
+                )
                 loss.backward()
                 if clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
                 optimizer.step()
 
-                acc_loss += torch.sum(loss).item()
-                acc_nll += torch.sum(nll).item()
-                acc_kl_theta_loss += torch.sum(kl_theta).item()
-                acc_kl_eta_loss += torch.sum(kl_eta).item()
-                acc_kl_alpha_loss += torch.sum(kl_alpha).item()
+            acc_loss += torch.sum(loss).item()
+            acc_nll += torch.sum(nll).item()
+            acc_kl_theta_loss += torch.sum(kl_theta).item()
+            acc_kl_eta_loss += torch.sum(kl_eta).item()
+            acc_kl_alpha_loss += torch.sum(kl_alpha).item()
             cnt += 1
 
         cur_loss = round(acc_loss / cnt, 2) 

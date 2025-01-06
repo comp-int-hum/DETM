@@ -7,7 +7,7 @@ from torch import nn
 import numpy
 
 
-class DETM(nn.Module):
+class xDETM(nn.Module):
     def __init__(
             self,
             num_topics,
@@ -27,7 +27,7 @@ class DETM(nn.Module):
             batch_size=32,
             device="cpu"
     ):
-        super(DETM, self).__init__()
+        super(xDETM, self).__init__()
 
         self.device = device
         self.batch_size = batch_size
@@ -41,8 +41,7 @@ class DETM(nn.Module):
         self.num_windows = math.ceil((max_time - min_time) / window_size)
         self.t_hidden_size = t_hidden_size
         self.eta_hidden_size = eta_hidden_size
-        self.all_embeddings = [(w, embeddings.wv[w]) for w in embeddings.wv.index_to_key]
-        
+
         self.enc_drop = enc_drop
         self.eta_nlayers = eta_nlayers
         self.t_drop = nn.Dropout(enc_drop)
@@ -130,6 +129,7 @@ class DETM(nn.Module):
             kl = 0.5 * torch.sum(kl, dim=-1)
         else:
             kl = -0.5 * torch.sum(1 + q_logsigma - q_mu.pow(2) - q_logsigma.exp(), dim=-1)
+
         return kl
 
     def get_alpha(self): ## mean field
@@ -155,6 +155,8 @@ class DETM(nn.Module):
     def get_eta(self, rnn_inp): ## structured amortized inference
         inp = self.q_eta_map(rnn_inp).unsqueeze(1)
         hidden = self.init_hidden()
+
+        # this is giving NaNs
         output, _ = self.q_eta(inp, hidden)
         output = output.squeeze()
 
@@ -182,32 +184,64 @@ class DETM(nn.Module):
 
                 p_mu_t = etas[t-1]
                 logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
+
+                # for name, vals in [
+                #         ("rnn_inp", rnn_inp),
+                #         ("hidden_0", hidden[0]),
+                #         ("hidden_1", hidden[1]),
+                #         ("inp", inp),
+                #         ("output", output),                        
+                #         ("inp_0", inp_0),
+                #         ("mu_0", mu_0),
+                #         ("inp_t", inp_t),
+                #         ("mu_t", mu_t),
+                #         ("logsigma_t", logsigma_t),
+                #         ("p_mu_t", p_mu_t),
+                #         ("logsigma_p_t", logsigma_p_t),
+                # ]:
+                #     if torch.any(torch.isnan(vals)):
+                #         print(name)
                 kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
                 kl_eta.append(kl_t)
             else:
                 etas[t] = mu_t
         if self.training:
             kl_eta = torch.stack(kl_eta).sum()
-            return etas, kl_eta
+            return torch.nan_to_num(etas), kl_eta
         else:
-            return etas, None
+            return torch.nan_to_num(etas), None
     
     def get_theta(self, eta, bows, times): ## amortized inference
         """Returns the topic proportions.
         """
         eta_td = eta[times.type('torch.LongTensor')]
         inp = torch.cat([bows, eta_td], dim=1)
-        q_theta = self.q_theta(inp)
+        q_theta = torch.nan_to_num(self.q_theta(inp))
         if self.enc_drop > 0 and self.training:
-            q_theta = self.t_drop(q_theta)
-        mu_theta = self.mu_q_theta(q_theta)
+            q_theta = torch.nan_to_num(self.t_drop(q_theta))
+        mu_theta = torch.nan_to_num(self.mu_q_theta(q_theta))
         if not self.training:
             return torch.nn.functional.softmax(mu_theta, dim=-1), None
-        logsigma_theta = self.logsigma_q_theta(q_theta)
+        logsigma_theta = torch.nan_to_num(self.logsigma_q_theta(q_theta))
         z = self.reparameterize(mu_theta, logsigma_theta)
-        theta = F.softmax(z, dim=-1)
+        theta = torch.nan_to_num(F.softmax(z, dim=-1))
+        for vals, name in [
+                (eta_td, "eta_td"),
+                (q_theta, "q_theta"),
+                (mu_theta, "mu_theta"),
+                (bows, "bows"),
+                (times, "times"),
+                (logsigma_theta, "logsigma_theta"),
+                (eta_td, "eta_td"),
+                (inp, "inp"),
+        ]:
+            if torch.any(torch.isnan(vals)):
+                print("{} has nans".format(name))
+            #if torch.any(torch.is(vals)):
+            #    print("{} has nans".format(name))
+                
         kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(self.device))
-        return theta, kl_theta
+        return torch.nan_to_num(theta), kl_theta
     
     def get_beta(self, alpha):
         """Returns the topic matrix \beta of shape K x V
@@ -238,9 +272,19 @@ class DETM(nn.Module):
         coeff = num_docs / bsz 
         alpha, kl_alpha = self.get_alpha()
         eta, kl_eta = self.get_eta(rnn_inp)
+        # for vals, name in [
+        #         #(theta, "theta"),
+        #         #(beta, "beta"),
+        #         (bows, "bows"),
+        #         (normalized_bows, "normalized_bows"),
+        #         (eta, "eta"),
+        #         (times, "times"),
+        # ]:
+        #     if torch.any(torch.isnan(vals)):
+        #         print(name)
+
         theta, kl_theta = self.get_theta(eta, normalized_bows, times)
         kl_theta = kl_theta.sum() * coeff
-
         beta = self.get_beta(alpha)
         beta = beta[times.type('torch.LongTensor')]
         nll = self.get_nll(theta, beta, bows)
@@ -280,7 +324,7 @@ class DETM(nn.Module):
                 rnn_input[t] += docs
                 cnt[t] += len(tmp)
         rnn_input = rnn_input / cnt.unsqueeze(1)
-        return rnn_input
+        return torch.nan_to_num(rnn_input)
 
     def get_completion_ppl(self, val_subdocs, val_times, val_rnn_inp, device, batch_size=128):
         """Returns document completion perplexity.
