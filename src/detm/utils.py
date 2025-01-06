@@ -1,12 +1,19 @@
-import copy
-import logging
-import random
-import torch
-import numpy
+import copy, logging, random, torch, numpy, gzip, json
+from typing import Dict, Any, Generator
 
 
 logger = logging.getLogger("utils")
 
+def open_jsonl_file(file_path: str) -> Generator[Dict[str, Any], None, None]:
+    with gzip.open(file_path, mode="rt") as f:
+        for line in f:
+            yield line
+
+
+def write_jsonl_file(dump_file_path: str, item_data: Dict[str, str]) -> None:
+    with gzip.open(dump_file_path, "at", encoding="utf-8") as file:
+        json_line = json.dumps(item_data)
+        file.write(json_line + "\n")
 
 def train_model(
         subdocs,

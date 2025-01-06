@@ -9,36 +9,31 @@ import numpy
 
 class DETM(nn.Module):
     def __init__(
-            self,
-            num_topics,
-            min_time,
-            max_time,
-            word_list,
+            self, num_topics, 
+            min_time, max_time,
             embeddings,
             t_hidden_size=800,
             eta_hidden_size=200,
-            enc_drop=0.0,
-            eta_dropout=0.0,
-            eta_nlayers=3,
-            delta=0.005,
-            window_size=None,
-            train_embeddings=False,
-            theta_act="relu",
-            batch_size=32,
+            enc_drop=0.0, eta_dropout=0.0,
+            eta_nlayers=3, delta=0.005,
+            window_size=None, train_embeddings=False,
+            num_windows=None,
+            theta_act="relu", batch_size=32,
             device="cpu"
     ):
         super(DETM, self).__init__()
 
         self.device = device
         self.batch_size = batch_size
-        self.word_list = word_list
         
         ## define hyperparameters
         self.num_topics = num_topics
         self.max_time = max_time
         self.min_time = min_time
         self.window_size = window_size
-        self.num_windows = math.ceil((max_time - min_time) / window_size)
+        self.num_windows = (num_windows 
+                            if num_windows 
+                            else math.ceil((max_time - min_time) / window_size))
         self.t_hidden_size = t_hidden_size
         self.eta_hidden_size = eta_hidden_size
 
@@ -50,7 +45,7 @@ class DETM(nn.Module):
         self.theta_act = self.get_activation(theta_act)
 
         
-        rho_data = numpy.array([embeddings.wv[w] for w in self.word_list])
+        rho_data = embeddings
         num_embeddings, emsize = rho_data.shape
         self.emsize = emsize
         self.rho_size = self.emsize
@@ -219,14 +214,20 @@ class DETM(nn.Module):
 
     def get_nll(self, theta, beta, bows):
         theta = theta.unsqueeze(1)
-        loglik = torch.bmm(theta, beta).squeeze(1)
-        loglik = loglik
-        loglik = torch.log(loglik+1e-6)
+        lik = torch.bmm(theta, beta).squeeze(1)
+        loglik = torch.log(lik + 1e-6)
         nll = -loglik * bows
         nll = nll.sum(-1)
         return nll
+
+    def get_lik(self, theta, beta):
+        lik = theta.unsqueeze(2) * beta
+        return lik
     
-    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs):
+    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs,
+                training=True):
+
+        self.training = training
         
         bows = bows.to(self.device)
         normalized_bows = normalized_bows.to(self.device)
@@ -238,14 +239,25 @@ class DETM(nn.Module):
         alpha, kl_alpha = self.get_alpha()
         eta, kl_eta = self.get_eta(rnn_inp)
         theta, kl_theta = self.get_theta(eta, normalized_bows, times)
-        kl_theta = kl_theta.sum() * coeff
 
-        beta = self.get_beta(alpha)
-        beta = beta[times.type('torch.LongTensor')]
-        nll = self.get_nll(theta, beta, bows)
-        nll = nll.sum() * coeff
-        nelbo = nll + kl_alpha + kl_eta + kl_theta
-        return nelbo, nll, kl_alpha, kl_eta, kl_theta
+        if self.training:
+            kl_theta = kl_theta.sum() * coeff
+            beta = self.get_beta(alpha)
+            beta = beta[times.type('torch.LongTensor')]
+            nll = self.get_nll(theta, beta, bows)
+            nll = nll.sum() * coeff
+            nelbo = nll + kl_alpha + kl_eta + kl_theta
+            return nelbo, nll, kl_alpha, kl_eta, kl_theta
+        else:
+            beta = self.get_beta(alpha[:, times.type("torch.LongTensor"), :])
+            beta = beta.permute(1, 0, 2) 
+            nll = self.get_nll(theta, beta, bows)
+            nll = nll.sum() * coeff
+            sums = bows.sum(dim=1, keepdim=True)
+            sums[sums == 0] = 1e-6
+            loss = nll / sums.squeeze()
+            loss = loss.mean().item()
+            return loss
 
     def init_hidden(self):
         """Initializes the first hidden state of the RNN used as inference network for \eta.
@@ -253,78 +265,8 @@ class DETM(nn.Module):
         weight = next(self.parameters())
         nlayers = self.eta_nlayers
         nhid = self.eta_hidden_size
-        return (weight.new_zeros(nlayers, 1, nhid), weight.new_zeros(nlayers, 1, nhid))
-
-    def get_rnn_input(self, subdocs, times, batch_size=32):        
-        window_count = self.num_windows
-        indices = torch.arange(0, len(subdocs), dtype=torch.int)
-        indices = torch.split(indices, batch_size)
-        rnn_input = torch.zeros(window_count, self.vocab_size).to(self.device)
-        cnt = torch.zeros(window_count, ).to(self.device)
-        for idx, ind in enumerate(indices):
-            batch_size = len(ind)
-            data_batch = numpy.zeros((batch_size, self.vocab_size))
-            times_batch = numpy.zeros((batch_size, ))
-            for i, doc_id in enumerate(ind):
-                subdoc = subdocs[doc_id]
-                window = times[doc_id]
-                times_batch[i] = window
-                for k, v in subdoc.items():
-                    data_batch[i, k] = v
-            data_batch = torch.from_numpy(data_batch).float().to(self.device)
-            times_batch = torch.from_numpy(times_batch).to(self.device)
-            for t in range(window_count):
-                tmp = (times_batch == t).nonzero()
-                docs = data_batch[tmp].squeeze().sum(0)
-                rnn_input[t] += docs
-                cnt[t] += len(tmp)
-        rnn_input = rnn_input / cnt.unsqueeze(1)
-        return rnn_input
-
-    def get_completion_ppl(self, val_subdocs, val_times, val_rnn_inp, device, batch_size=128):
-        """Returns document completion perplexity.
-        """
-
-        self.eval()
-        with torch.no_grad():
-            alpha = self.mu_q_alpha
-            acc_loss = 0.0
-            cnt = 0
-            eta, _ = self.get_eta(val_rnn_inp)
-            indices = torch.split(torch.tensor(range(len(val_subdocs))), batch_size)
-            for idx, ind in enumerate(indices):
-                batch_size = len(ind)
-                data_batch = numpy.zeros((batch_size, self.vocab_size))
-                times_batch = numpy.zeros((batch_size, ))
-                for i, doc_id in enumerate(ind):
-                    subdoc = val_subdocs[doc_id]
-                    tm = val_times[doc_id]
-                    times_batch[i] = tm
-                    for k, v in subdoc.items():
-                        data_batch[i, k] = v
-                data_batch = torch.from_numpy(data_batch).float().to(device)
-                times_batch = torch.from_numpy(times_batch).to(device)
-
-                sums = data_batch.sum(1).unsqueeze(1)
-                normalized_data_batch = data_batch / sums
-
-
-                eta_td = eta[times_batch.type('torch.LongTensor')]
-                theta, _ = self.get_theta(eta_td, normalized_data_batch, times_batch)
-                alpha_td = alpha[:, times_batch.type('torch.LongTensor'), :]
-                beta = self.get_beta(alpha_td).permute(1, 0, 2)
-                loglik = theta.unsqueeze(2) * beta
-                loglik = loglik.sum(1)
-                loglik = torch.log(loglik)
-                nll = -loglik * data_batch
-                nll = nll.sum(-1)
-                loss = nll / sums.squeeze()
-                loss = loss.mean().item()
-                acc_loss += loss
-                cnt += 1
-            cur_loss = acc_loss / cnt
-            ppl_all = round(math.exp(cur_loss), 1)
-        return ppl_all
+        return (weight.new_zeros(nlayers, 1, nhid), 
+                weight.new_zeros(nlayers, 1, nhid))
 
     
 

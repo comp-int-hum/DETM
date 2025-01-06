@@ -1,123 +1,153 @@
-import os
-import random
-import pickle
+import math, json
+from collections import Counter
 import numpy as np
-import torch 
-import scipy.io
+from .corpus import Corpus
+from .utils import open_jsonl_file
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+class Dataset:
 
-def _fetch(path, name):
-    if name == 'train':
-        token_file = os.path.join(path, 'bow_tr_tokens.mat')
-        count_file = os.path.join(path, 'bow_tr_counts.mat')
-    elif name == 'valid':
-        token_file = os.path.join(path, 'bow_va_tokens.mat')
-        count_file = os.path.join(path, 'bow_va_counts.mat')
-    else:
-        token_file = os.path.join(path, 'bow_ts_tokens.mat')
-        count_file = os.path.join(path, 'bow_ts_counts.mat')
-    tokens = scipy.io.loadmat(token_file)['tokens'].squeeze()
-    counts = scipy.io.loadmat(count_file)['counts'].squeeze()
-    if name == 'test':
-        token_1_file = os.path.join(path, 'bow_ts_h1_tokens.mat')
-        count_1_file = os.path.join(path, 'bow_ts_h1_counts.mat')
-        token_2_file = os.path.join(path, 'bow_ts_h2_tokens.mat')
-        count_2_file = os.path.join(path, 'bow_ts_h2_counts.mat')
-        tokens_1 = scipy.io.loadmat(token_1_file)['tokens'].squeeze()
-        counts_1 = scipy.io.loadmat(count_1_file)['counts'].squeeze()
-        tokens_2 = scipy.io.loadmat(token_2_file)['tokens'].squeeze()
-        counts_2 = scipy.io.loadmat(count_2_file)['counts'].squeeze()
-        return {'tokens': tokens, 'counts': counts, 'tokens_1': tokens_1, 'counts_1': counts_1, 'tokens_2': tokens_2, 'counts_2': counts_2}
-    return {'tokens': tokens, 'counts': counts}
+    def __init__(self, train_dir, eval_dir=None, train_proportion=0.8):
+        self.train_dir = train_dir
+        self.eval_dir = eval_dir
+        self.train_proportion = train_proportion
+    
+    def get_data(self, is_train=True):
+        if is_train:
+            return self.t_subdocs, self.t_times, self.t_auxiliaries, self.t_time_counter
+        
+        return self.e_subdocs, self.e_times, self.e_auxiliaries
+    
+    def preprocess_data(self, min_time, max_time, window_size,
+                        content_field, time_field,
+                        max_subdoc_length=500,
+                        min_word_occurrance=0, max_word_proportion=1.0,
+                        logger=None, word2id=None):
+        
+        if logger:
+            logger.info(f"----- starts preprocessing data ----- ")
 
-def _fetch_temporal(path, name):
-    if name == 'train':
-        token_file = os.path.join(path, 'bow_tr_tokens.mat')
-        count_file = os.path.join(path, 'bow_tr_counts.mat')
-        time_file = os.path.join(path, 'bow_tr_timestamps.mat')
-    elif name == 'valid':
-        token_file = os.path.join(path, 'bow_va_tokens.mat')
-        count_file = os.path.join(path, 'bow_va_counts.mat')
-        time_file = os.path.join(path, 'bow_va_timestamps.mat')
-    else:
-        token_file = os.path.join(path, 'bow_ts_tokens.mat')
-        count_file = os.path.join(path, 'bow_ts_counts.mat')
-        time_file = os.path.join(path, 'bow_ts_timestamps.mat')
-    tokens = scipy.io.loadmat(token_file)['tokens'].squeeze()
-    counts = scipy.io.loadmat(count_file)['counts'].squeeze()
-    times = scipy.io.loadmat(time_file)['timestamps'].squeeze()
-    if name == 'test':
-        token_1_file = os.path.join(path, 'bow_ts_h1_tokens.mat')
-        count_1_file = os.path.join(path, 'bow_ts_h1_counts.mat')
-        token_2_file = os.path.join(path, 'bow_ts_h2_tokens.mat')
-        count_2_file = os.path.join(path, 'bow_ts_h2_counts.mat')
-        tokens_1 = scipy.io.loadmat(token_1_file)['tokens'].squeeze()
-        counts_1 = scipy.io.loadmat(count_1_file)['counts'].squeeze()
-        tokens_2 = scipy.io.loadmat(token_2_file)['tokens'].squeeze()
-        counts_2 = scipy.io.loadmat(count_2_file)['counts'].squeeze()
-        return {'tokens': tokens, 'counts': counts, 'times': times, 
-                    'tokens_1': tokens_1, 'counts_1': counts_1, 
-                        'tokens_2': tokens_2, 'counts_2': counts_2} 
-    return {'tokens': tokens, 'counts': counts, 'times': times}
+        train_corpus = Corpus([])
+        eval_corpus = Corpus([])
 
-def get_data(path, temporal=False):
-    ### load vocabulary
-    with open(os.path.join(path, 'vocab.pkl'), 'rb') as f:
-        vocab = pickle.load(f)
-
-    if not temporal:
-        train = _fetch(path, 'train')
-        valid = _fetch(path, 'valid')
-        test = _fetch(path, 'test')
-    else:
-        train = _fetch_temporal(path, 'train')
-        valid = _fetch_temporal(path, 'valid')
-        test = _fetch_temporal(path, 'test')
-
-    return vocab, train, valid, test
-
-def get_batch(tokens, counts, ind, vocab_size, emsize=300, temporal=False, times=None):
-    """fetch input data by batch."""
-    batch_size = len(ind)
-    data_batch = np.zeros((batch_size, vocab_size))
-    if temporal:
-        times_batch = np.zeros((batch_size, ))
-    for i, doc_id in enumerate(ind):
-        doc = tokens[doc_id]
-        count = counts[doc_id]
-        if temporal:
-            timestamp = times[doc_id]
-            times_batch[i] = timestamp
-        L = count.shape[1]
-        if len(doc) == 1: 
-            doc = [doc.squeeze()]
-            count = [count.squeeze()]
+        train_data_generator = open_jsonl_file(self.train_dir)
+        try:
+            while True:
+                entry = next(train_data_generator)
+                train_corpus.append(json.loads(entry))
+        except StopIteration:
+            pass
+        
+        if word2id:
+            t_subdocs, t_times, t_auxiliaries, _ = train_corpus.filter_corpus(
+                self.max_subdoc_length,
+                content_field, time_field,
+                word_to_id=word2id,
+                min_year=min_time, max_year=max_time,
+                window_size=window_size,
+                logger=logger)
         else:
-            doc = doc.squeeze()
-            count = count.squeeze()
-        if doc_id != -1:
-            for j, word in enumerate(doc):
-                data_batch[i, word] = count[j]
-    data_batch = torch.from_numpy(data_batch).float().to(device)
-    if temporal:
-        times_batch = torch.from_numpy(times_batch).to(device)
-        return data_batch, times_batch
-    return data_batch
+            t_subdocs, t_times, t_auxiliaries, word2id = train_corpus.filter_corpus(
+                max_subdoc_length,
+                content_field, time_field,
+                min_word_count=min_word_occurrance, max_word_proportion=max_word_proportion,
+                min_year=min_time, max_year=max_time, window_size=window_size,
+                logger=logger)
+        
+        if self.eval_dir:
+            eval_data_generator = open_jsonl_file(self.eval_dir)
+            try:
+                while True:
+                    entry = next(eval_data_generator)
+                    eval_corpus.append(json.loads(entry))
+            except StopIteration:
+                pass
+            e_subdocs, e_times, e_auxiliaries, _ = eval_corpus.filter_corpus(
+                max_subdoc_length, content_field, time_field, word_to_id=word2id,
+                min_word_count=min_word_occurrance, max_word_proportion=max_word_proportion,
+                min_year=min_time, max_year=max_time, window_size=window_size,
+                logger=logger
+            )
 
-def get_rnn_input(tokens, counts, times, num_times, vocab_size, num_docs):
-    indices = torch.randperm(num_docs)
-    indices = torch.split(indices, 1000) 
-    rnn_input = torch.zeros(num_times, vocab_size).to(device)
-    cnt = torch.zeros(num_times, ).to(device)
-    for idx, ind in enumerate(indices):
-        data_batch, times_batch = get_batch(tokens, counts, ind, vocab_size, temporal=True, times=times)
-        for t in range(num_times):
-            tmp = (times_batch == t).nonzero()
-            docs = data_batch[tmp].squeeze().sum(0)
-            rnn_input[t] += docs
-            cnt[t] += len(tmp)
-        if idx % 20 == 0:
-            print('idx: {}/{}'.format(idx, len(indices)))
-    rnn_input = rnn_input / cnt.unsqueeze(1)
-    return rnn_input
+        else:
+            t_subdocs, t_times, t_auxiliaries, e_subdocs, e_times, e_auxiliaries = self.split_train_eval(
+                t_subdocs, t_times, t_auxiliaries, self.train_proportion, logger=logger)
+        
+        time_counter = self.organize_train_data_by_times(t_subdocs, t_times, t_auxiliaries, logger=logger)
+
+        self.t_subdocs = t_subdocs
+        self.t_times = t_times
+        self.t_time_counter = time_counter
+        self.t_auxiliaries = t_auxiliaries
+
+        self.e_subdocs = e_subdocs
+        self.e_times = e_times
+        self.e_auxiliaries = e_auxiliaries
+
+        word2id = sorted(word2id.items(), key=lambda x : x[1])
+        return [w[0] for w in word2id]
+    
+    def split_train_eval(self, subdocs, times, auxiliaries, train_proportion, logger):
+        
+        if logger:
+            logger.info(f"----- starts splitting train and eval ----- ")
+
+        assert len(subdocs) == len(times)
+        assert len(times) == len(auxiliaries)
+        shuffled_indices = np.random.permutation(len(times))
+        train_eval_split = math.ceil(len(times) * train_proportion)
+
+        train_indices = set(shuffled_indices[:train_eval_split])
+        eval_indices = set(shuffled_indices[train_eval_split:])
+        t_subdocs, e_subdocs = [], []
+        t_times, e_times = [], []
+        t_auxiliaries, e_auxiliaries = [], []
+
+        for idx, (subdoc, time, auxiliary) in enumerate(
+            zip(subdocs, times, auxiliaries)
+            ):
+            if idx in train_indices:
+                t_subdocs.append(subdoc)
+                t_times.append(time)
+                t_auxiliaries.append(auxiliary)
+            elif idx in eval_indices:
+                e_subdocs.append(subdoc)
+                e_times.append(time)
+                e_auxiliaries.append(auxiliary)
+        
+        t_counter = Counter(t_times)
+        e_counter = Counter(e_times)
+
+        if logger:
+            logger.info(f"training time counter: {t_counter};\n eval time counter: {e_counter}")
+            logger.info(f"----- complete splitting train and eval ----- ")
+
+        return t_subdocs, t_times, t_auxiliaries, e_subdocs, e_times, e_auxiliaries
+
+    def organize_train_data_by_times(self, subdocs, times, auxiliaries, logger):
+
+        if logger:
+            logger.info(f"----- starts organzing data by time ----- ")
+
+        sorted_indices = sorted(range(len(times)), key=lambda i: times[i])
+
+        subdocs = [subdocs[i] for i in sorted_indices]
+        times = [times[i] for i in sorted_indices]
+        auxiliaries = [auxiliaries[i] for i in sorted_indices]
+    
+        time_counter = sorted(Counter(times).items(), 
+                              key=lambda x: x[0])
+        buffer = 0
+        for time_idx, counts in time_counter:
+            time_set = set(times[buffer:buffer+counts])
+            try:
+                assert len(time_set) == 1 and list(time_set)[0] == time_idx
+
+                if logger:
+                    logger.info(f"expected {counts} in time idx {time_idx}, confirmed")
+            except AssertionError:
+                raise AssertionError(f"expected {counts} in time idx {time_idx}, but instead got {times[buffer:buffer+counts]}")
+            buffer += counts
+
+        if logger:
+            logger.info(f"----- completes organizing data by time ----- ")
+        return time_counter

@@ -1,0 +1,136 @@
+import torch, math, copy
+from .original import DETM
+
+class Trainer:
+
+    def __init__(self, logger):
+        self.logger = logger
+    
+    def init_model(self, embeddings, 
+                       num_windows, num_topics, min_time, max_time,
+                       t_hidden_size, eta_hidden_size,
+                       enc_drop, eta_dropout, eta_nlayers, delta,
+                       window_size, train_embeddings,
+                       theta_act, batch_size, device):
+
+        self.model = DETM(num_topics=num_topics, 
+                          min_time=min_time, max_time=max_time,
+                          embeddings=embeddings,
+                          t_hidden_size=t_hidden_size,
+                          eta_hidden_size=eta_hidden_size,
+                          enc_drop=enc_drop, eta_dropout=eta_dropout,
+                          eta_nlayers=eta_nlayers, delta=delta,
+                          window_size=window_size, train_embeddings=train_embeddings,
+                          num_windows=num_windows, theta_act=theta_act, 
+                          batch_size=batch_size, device=device)
+        self.model.to(device)
+    
+    def init_training_params(self, num_train, num_eval,
+                             learning_rate, wdecay, clip,
+                             reduce_rate, lr_factor, early_stop
+                             ):
+
+        assert self.model
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=learning_rate, weight_decay=wdecay
+            )
+        
+        self.clip, self.num_train, self.num_eval = clip, num_train, num_eval
+        self.reduce_rate, self.lr_factor, self.early_stop = reduce_rate, lr_factor, early_stop
+        self.epoch, self.since_improvement, self.since_annealing = 0, 0, 0
+        self.best_state, self.best_eval_ppl = None, None
+    
+    def start_epoch(self):
+        self.logger.info(f"Starting epoch {self.epoch}")
+        self.train_acc_nelbo = 0
+        self.train_acc_nll = 0
+        self.train_acc_kl_alpha_loss = 0
+        self.train_acc_kl_eta_loss = 0
+        self.train_acc_kl_theta_loss = 0
+        self.train_cnt = 0
+
+        self.eval_acc_loss = 0
+        self.eval_cnt = 0
+    
+    def train_model(self, batch_generator, rnn_input):
+        self.model.train()
+
+        try:
+            while True:  
+                data_batch, normalized_data_batch, times_batch, _ = next(batch_generator)
+                nelbo, nll, kl_alpha, kl_eta, kl_theta = self.model(data_batch, normalized_data_batch, 
+                                                                    times_batch, rnn_input, 
+                                                                    self.num_train)
+                self.train_acc_nelbo += torch.sum(nelbo).item()
+                self.train_acc_nll += torch.sum(nll).item()
+                self.train_acc_kl_alpha_loss += torch.sum(kl_alpha).item()
+                self.train_acc_kl_eta_loss += torch.sum(kl_eta).item()
+                self.train_acc_kl_theta_loss += torch.sum(kl_theta).item()
+                self.train_cnt += 1
+
+                if not torch.any(torch.isnan(nelbo)):
+                    nelbo.backward()
+                    if self.clip > 0:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+                    self.optimizer.step()
+
+        except StopIteration:
+            pass
+    
+    def eval_model(self, batch_generator, rnn_input):
+        self.model.eval()
+        with torch.no_grad():
+            try:
+                while True:
+                    data_batch, normalized_data_batch, times_batch, _ = next(batch_generator)
+                    loss = self.model(data_batch, normalized_data_batch, 
+                                      times_batch, rnn_input, 
+                                      self.num_eval, training=False)
+                    
+                    self.eval_acc_loss += loss
+                    self.eval_cnt += 1
+                    
+            except StopIteration:
+                pass
+    
+    def end_epoch(self) -> bool:
+
+        eval_ppl = math.exp(self.eval_acc_loss / self.eval_cnt)
+        
+        self.logger.info(
+            "Epoch {}: LR: {}, KL_theta: {}, KL_eta: {}, KL_alpha: {}, Rec_loss: {}, NELBO: {}, PPL: {}".format(
+                self.epoch, self.optimizer.param_groups[0]["lr"],
+                round(self.train_acc_kl_theta_loss / self.train_cnt, 2),
+                round(self.train_acc_kl_eta_loss / self.train_cnt, 2),
+                round(self.train_acc_kl_alpha_loss / self.train_cnt, 2),
+                round(self.train_acc_nll / self.train_cnt, 2),
+                round(self.train_acc_nelbo / self.train_cnt, 2),
+                round(eval_ppl, 1)
+            )
+        )
+    
+        if not self.best_eval_ppl or eval_ppl < self.best_eval_ppl:
+            self.logger.info("Copying new best model...")
+            self.best_eval_ppl = eval_ppl
+            self.best_state = copy.deepcopy(self.model.state_dict())
+            self.since_improvement = 0
+            self.logger.info("Copied.")
+        else:
+            self.since_improvement += 1
+        self.since_annealing += 1
+        if (
+            self.since_improvement > self.reduce_rate and 
+            self.since_annealing > self.reduce_rate
+        ):
+            self.optimizer.param_groups[0]["lr"] /= self.lr_factor
+            self.model.load_state_dict(self.best_state)
+            self.since_annealing = 0
+        elif self.since_improvement >= self.early_stop:
+            return False
+    
+        return True
+
+    def get_best_model(self):
+        self.model.load_state_dict(self.best_state)
+        return self.model
