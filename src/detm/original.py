@@ -127,6 +127,10 @@ class DETM(nn.Module):
         return kl
 
     def get_alpha(self): ## mean field
+        
+        if not self.training:
+            return self.mu_q_alpha, None
+        
         alphas = torch.zeros(self.num_windows, self.num_topics, self.rho_size).to(self.device)
         kl_alpha = []
 
@@ -203,14 +207,16 @@ class DETM(nn.Module):
         kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(self.device))
         return theta, kl_theta
     
-    def get_beta(self, alpha):
+    def get_beta(self, alpha, times):
         """Returns the topic matrix \beta of shape K x V
         """
+        if not self.training:
+            alpha = alpha[:, times.type("torch.LongTensor"), :]
         tmp = alpha.view(alpha.size(0)*alpha.size(1), self.rho_size)
         logit = torch.mm(tmp, self.rho.permute(1, 0)) 
         logit = logit.view(alpha.size(0), alpha.size(1), -1)
         beta = F.softmax(logit, dim=-1)
-        return beta 
+        return beta[times.type('torch.LongTensor')] if self.training else beta.permute(1, 0, 2)
 
     def get_nll(self, theta, beta, bows):
         theta = theta.unsqueeze(1)
@@ -233,28 +239,22 @@ class DETM(nn.Module):
         normalized_bows = normalized_bows.to(self.device)
         times = times.to(self.device)
         rnn_inp = rnn_inp.to(self.device)
-
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz 
+
         alpha, kl_alpha = self.get_alpha()
         eta, kl_eta = self.get_eta(rnn_inp)
         theta, kl_theta = self.get_theta(eta, normalized_bows, times)
+        beta = self.get_beta(alpha, times)
+        nll = self.get_nll(theta, beta, bows)
 
         if self.training:
-            kl_theta = kl_theta.sum() * coeff
-            beta = self.get_beta(alpha)
-            beta = beta[times.type('torch.LongTensor')]
-            nll = self.get_nll(theta, beta, bows)
             nll = nll.sum() * coeff
+            kl_theta = kl_theta.sum() * coeff
             nelbo = nll + kl_alpha + kl_eta + kl_theta
             return nelbo, nll, kl_alpha, kl_eta, kl_theta
         else:
-            beta = self.get_beta(alpha[:, times.type("torch.LongTensor"), :])
-            beta = beta.permute(1, 0, 2) 
-            nll = self.get_nll(theta, beta, bows)
-            nll = nll.sum() * coeff
             sums = bows.sum(dim=1, keepdim=True)
-            sums[sums == 0] = 1e-6
             loss = nll / sums.squeeze()
             loss = loss.mean().item()
             return loss
@@ -267,9 +267,3 @@ class DETM(nn.Module):
         nhid = self.eta_hidden_size
         return (weight.new_zeros(nlayers, 1, nhid), 
                 weight.new_zeros(nlayers, 1, nhid))
-
-    
-
-
-
-

@@ -53,7 +53,7 @@ class DataLoader:
         random.seed(seed)
         torch.manual_seed(seed)
 
-        if self.time_counter: 
+        if self.time_counter:
         
             total_batch_num = math.ceil(self.data_length / self.batch_size)
             batch_indices_list = [[] for _ in range(total_batch_num)]

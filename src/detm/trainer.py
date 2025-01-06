@@ -88,6 +88,7 @@ class Trainer:
                                       times_batch, rnn_input, 
                                       self.num_eval, training=False)
                     
+                    self.logger.info(f"current batch eval loss {loss}, count {self.eval_cnt}")
                     self.eval_acc_loss += loss
                     self.eval_cnt += 1
                     
@@ -96,7 +97,7 @@ class Trainer:
     
     def end_epoch(self) -> bool:
 
-        eval_ppl = math.exp(self.eval_acc_loss / self.eval_cnt)
+        eval_ppl = round(math.exp(self.eval_acc_loss / self.eval_cnt))
         
         self.logger.info(
             "Epoch {}: LR: {}, KL_theta: {}, KL_eta: {}, KL_alpha: {}, Rec_loss: {}, NELBO: {}, PPL: {}".format(
