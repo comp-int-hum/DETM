@@ -1,4 +1,4 @@
-import torch, math, copy
+import torch, math, copy, gzip
 from .original import DETM
 
 class Trainer:
@@ -6,7 +6,7 @@ class Trainer:
     def __init__(self, logger):
         self.logger = logger
     
-    def init_model(self, embeddings, 
+    def init_model(self, embeddings, word_list,
                        num_windows, num_topics, min_time, max_time,
                        t_hidden_size, eta_hidden_size,
                        enc_drop, eta_dropout, eta_nlayers, delta,
@@ -15,7 +15,7 @@ class Trainer:
 
         self.model = DETM(num_topics=num_topics, 
                           min_time=min_time, max_time=max_time,
-                          embeddings=embeddings,
+                          embeddings=embeddings, word_list=word_list,
                           t_hidden_size=t_hidden_size,
                           eta_hidden_size=eta_hidden_size,
                           enc_drop=enc_drop, eta_dropout=eta_dropout,
@@ -40,6 +40,12 @@ class Trainer:
         self.reduce_rate, self.lr_factor, self.early_stop = reduce_rate, lr_factor, early_stop
         self.epoch, self.since_improvement, self.since_annealing = 0, 0, 0
         self.best_state, self.best_eval_ppl = None, None
+    
+    def load_model(self, model_dir, device):
+        with gzip.open(model_dir, "rb") as ifd:
+            self.model = torch.load(ifd, map_location=torch.device(device))
+        
+        return {token: idx for idx, token in enumerate(self.model.word_list)}
     
     def start_epoch(self):
         self.logger.info(f"Starting epoch {self.epoch}")
@@ -94,6 +100,26 @@ class Trainer:
                     
             except StopIteration:
                 pass
+    
+    def apply_model(self, dataloader, num_appl, window_num, seed):
+        vocab_num = len(self.model.word_list)
+        batch_generator = dataloader.batch_generator(vocab_num, seed, self.logger)
+        rnn_input = dataloader.get_rnn(window_num, vocab_num)
+        self.model.eval()
+        with torch.no_grad():
+            try:
+                while True:
+                    data_batch, normalized_data_batch, times_batch, data_inds = next(batch_generator)
+                    liks = self.model(data_batch, normalized_data_batch, 
+                                      times_batch, rnn_input, num_appl, 
+                                      training=False, get_lik=True)
+                    
+                    dataloader.update_subdoc_counts(liks, data_inds, self.model.word_list, self.logger)
+                    
+            except StopIteration:
+                pass
+        
+        return dataloader.get_appl_data()
     
     def end_epoch(self) -> bool:
 

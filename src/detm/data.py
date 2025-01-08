@@ -39,12 +39,18 @@ class Dataset:
         
         if word2id:
             t_subdocs, t_times, t_auxiliaries, _ = train_corpus.filter_corpus(
-                self.max_subdoc_length,
+                max_subdoc_length,
                 content_field, time_field,
                 word_to_id=word2id,
                 min_year=min_time, max_year=max_time,
                 window_size=window_size,
                 logger=logger)
+            
+            if self.train_proportion == -1:
+                self.e_subdocs = t_subdocs
+                self.e_times = t_times
+                self.e_auxiliaries = t_auxiliaries
+                return None
         else:
             t_subdocs, t_times, t_auxiliaries, word2id = train_corpus.filter_corpus(
                 max_subdoc_length,
@@ -72,7 +78,7 @@ class Dataset:
             t_subdocs, t_times, t_auxiliaries, e_subdocs, e_times, e_auxiliaries = self.split_train_eval(
                 t_subdocs, t_times, t_auxiliaries, self.train_proportion, logger=logger)
         
-        time_counter = self.organize_train_data_by_times(t_subdocs, t_times, t_auxiliaries, logger=logger)
+        t_subdocs, t_times, t_auxiliaries, time_counter = self.organize_train_data_by_times(t_subdocs, t_times, t_auxiliaries, logger=logger)
 
         self.t_subdocs = t_subdocs
         self.t_times = t_times
@@ -150,4 +156,4 @@ class Dataset:
 
         if logger:
             logger.info(f"----- completes organizing data by time ----- ")
-        return time_counter
+        return subdocs, times, auxiliaries, time_counter

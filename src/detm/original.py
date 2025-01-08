@@ -11,7 +11,7 @@ class DETM(nn.Module):
     def __init__(
             self, num_topics, 
             min_time, max_time,
-            embeddings,
+            embeddings, word_list,
             t_hidden_size=800,
             eta_hidden_size=200,
             enc_drop=0.0, eta_dropout=0.0,
@@ -44,7 +44,7 @@ class DETM(nn.Module):
         self.train_embeddings = train_embeddings
         self.theta_act = self.get_activation(theta_act)
 
-        
+        self.word_list = word_list
         rho_data = embeddings
         num_embeddings, emsize = rho_data.shape
         self.emsize = emsize
@@ -231,9 +231,11 @@ class DETM(nn.Module):
         return lik
     
     def forward(self, bows, normalized_bows, times, rnn_inp, num_docs,
-                training=True):
-
+                training=True, get_lik=False):
         self.training = training
+        
+        # if it is get likelihood, it should not be in the training loop
+        assert (get_lik is False) or (get_lik is True and training is False)
         
         bows = bows.to(self.device)
         normalized_bows = normalized_bows.to(self.device)
@@ -246,6 +248,10 @@ class DETM(nn.Module):
         eta, kl_eta = self.get_eta(rnn_inp)
         theta, kl_theta = self.get_theta(eta, normalized_bows, times)
         beta = self.get_beta(alpha, times)
+
+        if get_lik:
+            return self.get_lik(theta, beta)
+        
         nll = self.get_nll(theta, beta, bows)
 
         if self.training:
