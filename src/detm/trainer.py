@@ -122,8 +122,10 @@ class Trainer:
         return dataloader.get_appl_data()
     
     def end_epoch(self) -> bool:
-
-        eval_ppl = round(math.exp(self.eval_acc_loss / self.eval_cnt))
+        if math.isnan(self.eval_acc_loss) or self.eval_cnt <= 0:
+            eval_ppl = float('nan')
+        else:
+            eval_ppl = round(math.exp(self.eval_acc_loss / self.eval_cnt))
         
         self.logger.info(
             "Epoch {}: LR: {}, KL_theta: {}, KL_eta: {}, KL_alpha: {}, Rec_loss: {}, NELBO: {}, PPL: {}".format(

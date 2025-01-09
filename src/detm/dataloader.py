@@ -1,7 +1,6 @@
-import math, random, gzip, json, torch
+import math, random, torch
 from collections import Counter
 import numpy as np
-from .data import Dataset
 
 class DataLoader:
     
@@ -104,7 +103,7 @@ class DataLoader:
                 time_set = set(self.times[buffer:buffer+counts])
                 try:
                     assert len(time_set) == 1 and list(time_set)[0] == time_idx
-                    logger.info(f"expected {counts} in time idx {time_idx}, confirmed")
+                    # logger.info(f"expected {counts} in time idx {time_idx}, confirmed")
                 except AssertionError:
                     raise AssertionError(f"expected {counts} in time idx {time_idx}, but instead got {self.times[buffer:buffer+counts]}")
                 buffer += counts
@@ -124,7 +123,7 @@ class DataLoader:
 
             if logger:
                 time_included = Counter(times_batch.tolist())
-                logger.info(f"{time_included}")
+                # logger.info(f"{time_included}")
                 time_included = time_included.keys()
                 time_missed = [window_range for (idx, window_range) in 
                                enumerate(self.all_window_ranges) if idx not in time_included]

@@ -1,11 +1,8 @@
 """This file defines a dynamic etm object.
 """
-import math
-import torch
+import math, torch
 import torch.nn.functional as F 
 from torch import nn
-import numpy
-
 
 class DETM(nn.Module):
     def __init__(

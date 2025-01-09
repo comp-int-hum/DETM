@@ -1,6 +1,7 @@
 import math, json
 from collections import Counter
 import numpy as np
+
 from .corpus import Corpus
 from .utils import open_jsonl_file
 

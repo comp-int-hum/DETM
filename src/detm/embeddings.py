@@ -1,6 +1,5 @@
+import numpy, re
 from gensim.models import Word2Vec
-import torch, numpy, re
-
 
 def train_embeddings(corpus, content_field, lowercase=True, 
                      epochs=10, window_size=5, embedding_size=300, random_seed=None):

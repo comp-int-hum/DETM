@@ -1,7 +1,4 @@
-import math
-import logging
-import re
-import numpy
+import math, logging, re, numpy
 
 logger = logging.getLogger("corpus")
 
