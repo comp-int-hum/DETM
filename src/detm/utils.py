@@ -8,7 +8,7 @@ from torch import autograd
 
 logger = logging.getLogger("utils")
 
-
+    
 def train_model(
         subdocs,
         times,
@@ -19,30 +19,29 @@ def train_model(
         lr_factor=2.0,
         batch_size=32,
         device="cpu",
-        val_proportion=0.2
+        val_proportion=0.2,
+        detect_anomalies=False
 ):
-    #word_to_id = {w : i for i, w in enumerate(model.embeddings.wv.index_to_key)}
-
-    #subdocs = [{model.word_to_id[w] : c for w, c in subdoc.items()} for subdoc in subdocs]
-    times = [model.represent_time(t) for t in times]
+    #times = [model.represent_time(t) for t in times]
+    model = model.to(device)
     
-    random.shuffle(subdocs)
-    train_docs = subdocs[int(val_proportion*len(subdocs)):]
-    val_docs = subdocs[:int(val_proportion*len(subdocs))]
-
-    train_times = times[int(val_proportion*len(times)):]
-    val_times = times[:int(val_proportion*len(times))]
+    pairs = list(zip(subdocs, times))
+    random.shuffle(pairs)
     
-    train_rnn_input = model.get_rnn_input(train_docs, train_times)
-    val_rnn_input = model.get_rnn_input(train_docs, train_times)
+    train_subdocs = [x for x, _ in pairs[int(val_proportion*len(subdocs)):]]
+    val_subdocs = [x for x, _ in pairs[:int(val_proportion*len(subdocs))]]
 
-    best_state = None
-    best_val_ppl = None
+    train_times = [x for _, x in pairs[int(val_proportion*len(times)):]]
+    val_times = [x for _, x in pairs[:int(val_proportion*len(times))]]
+    
+    best_state = copy.deepcopy(model.state_dict())
+    best_val_ppl = float("inf")
     since_annealing = 0
     since_improvement = 0
     for epoch in range(1, max_epochs + 1):
         logger.info("Starting epoch %d", epoch)
-        model.train()
+        model.train(True)
+        model.prepare_for_data(train_subdocs, train_times)
         
         acc_loss = 0
         acc_nll = 0
@@ -50,35 +49,29 @@ def train_model(
         acc_kl_eta_loss = 0
         acc_kl_alpha_loss = 0
         cnt = 0
-        indices = torch.randperm(len(train_docs))
+        indices = torch.randperm(len(train_subdocs))
         indices = torch.split(indices, batch_size)
-
         for idx, ind in enumerate(indices):
             optimizer.zero_grad()
             model.zero_grad()
-            batch_size = len(ind)
-            data_batch = numpy.zeros((batch_size, model.vocab_size))
-            times_batch = numpy.zeros((batch_size, ))
+            actual_batch_size = len(ind)
+            data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
+            times_batch = numpy.zeros((actual_batch_size, ))
 
             for i, doc_id in enumerate(ind):
-                subdoc = train_docs[doc_id]
-                tm = train_times[doc_id]
-                times_batch[i] = tm
-                #data_batch.append(subdoc)
+                subdoc = train_subdocs[doc_id]
+                times_batch[i] = train_times[doc_id] #0 if idx > 0 else train_times[doc_id]
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
             data_batch = torch.from_numpy(data_batch).float()
             times_batch = torch.from_numpy(times_batch)
             sums = data_batch.sum(1).unsqueeze(1)
             normalized_data_batch = data_batch / sums
-            with autograd.set_detect_anomaly(False):
+            with autograd.set_detect_anomaly(detect_anomalies):
 
                 loss, nll, kl_alpha, kl_eta, kl_theta = model(
                     data_batch,
-                    normalized_data_batch,
                     times_batch,
-                    train_rnn_input,
-                    len(train_docs),
                 )
                 loss.backward()
                 if clip > 0:
@@ -90,7 +83,7 @@ def train_model(
             acc_kl_theta_loss += torch.sum(kl_theta).item()
             acc_kl_eta_loss += torch.sum(kl_eta).item()
             acc_kl_alpha_loss += torch.sum(kl_alpha).item()
-            cnt += 1
+            cnt += data_batch.shape[0]
 
         cur_loss = round(acc_loss / cnt, 2) 
         cur_nll = round(acc_nll / cnt, 2) 
@@ -101,24 +94,27 @@ def train_model(
 
 
         logger.info("Computing perplexity...")
-
-        val_ppl = model.get_completion_ppl(val_docs, val_times, val_rnn_input, device)
+        _, val_ppl = apply_model(
+            model,
+            val_subdocs,
+            val_times,
+            batch_size,
+            detect_anomalies=detect_anomalies
+        )
         logger.info(
-            '{}: LR: {}, KL_theta: {}, KL_eta: {}, KL_alpha: {}, Rec_loss: {}, NELBO: {}, PPL: {}'.format(
+            '{}: LR: {}, Train doc losses: mix_prior={:.3f}, mix={:.3f}, embs={:.3f}, recon={:.3f}, NELBO={:.3f} Val doc ppl: {:.3f}'.format(
                 epoch,
                 lr,
-                cur_kl_theta,
                 cur_kl_eta,
+                cur_kl_theta,
                 cur_kl_alpha,
                 cur_nll,
                 cur_loss,
                 val_ppl
             )
         )
-            
-        
 
-        if best_val_ppl == None or val_ppl < best_val_ppl:
+        if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
             best_val_ppl = val_ppl
             best_state = copy.deepcopy(model.state_dict())
@@ -132,34 +128,55 @@ def train_model(
             model.load_state_dict(best_state)
             since_annealing = 0
         elif numpy.isnan(val_ppl):
-            logger.error("Perplexity was NaN: something has probably gone wrong, stopping early...")
-            break
+            logger.error("Perplexity was NaN: reducing learning rate and trying again...")
+            model.load_state_dict(best_state)
+            optimizer.param_groups[0]['lr'] /= lr_factor
         elif since_improvement >= 10:
             break
 
     return best_state
 
 
-def perplexity_on_corpus(
-        model,
-        corpus,
-        max_subdoc_length,
-        content_field,
-        time_field=None,
-        lowercase=True,
-        device="cpu"
-):
-    subdocs, times = corpus.filter_for_model(
-        model,
-        max_subdoc_length,
-        content_field,
-        time_field,
-        lowercase
-    )
-    times = [model.represent_time(t) for t in times]
-    rnn_input = model.get_rnn_input(subdocs, times)
-    return model.get_completion_ppl(subdocs, times, rnn_input, device)
 
+def apply_model(
+        model,
+        subdocs,
+        times,
+        batch_size=32,
+        device="cpu",
+        detect_anomalies=False
+):
+    model.train(False)
+    model.prepare_for_data(subdocs, times)
+
+    ppl = 0
+    cnt = 0
+    indices = torch.randperm(len(subdocs))
+    indices = torch.split(indices, batch_size)
+
+    for idx, ind in enumerate(indices):
+        actual_batch_size = len(ind)
+        data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
+        times_batch = numpy.zeros((actual_batch_size, ))
+
+        for i, subdoc_id in enumerate(ind):
+            subdoc = subdocs[subdoc_id]
+            tm = times[subdoc_id]
+            times_batch[i] = tm
+            for k, v in subdoc.items():
+                data_batch[i, k] = v
+        data_batch = torch.from_numpy(data_batch).float()
+        times_batch = torch.from_numpy(times_batch)
+        sums = data_batch.sum(1).unsqueeze(1)
+        with autograd.set_detect_anomaly(detect_anomalies):
+            loss, nll, kl_alpha, kl_eta, kl_theta = model(
+                data_batch,
+                times_batch,
+            )
+
+            ppl += torch.sum(nll).item()
+            cnt += data_batch.shape[0]
+    return (), ppl / cnt
 
 # from sklearn.manifold import TSNE
 # import torch 

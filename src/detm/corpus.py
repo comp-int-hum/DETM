@@ -30,7 +30,7 @@ class Corpus(list):
     ):
         subdocs = []
         times = []
-        word_to_id = {w : i for i, w in enumerate(model.word_list)}
+        word_to_index = {w : i for i, w in enumerate(model.word_list)}
         dropped_because_empty = 0
         dropped_because_timeless = 0
         for doc in self:
@@ -38,7 +38,6 @@ class Corpus(list):
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
                     time = float(time)                    
-                    #unique_times.add(time)
                 else:
                     dropped_because_timeless += 1
                     continue
@@ -46,8 +45,8 @@ class Corpus(list):
             for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
                 subdoc = {}
                 for t in subdoc_tokens:
-                    if t in word_to_id:
-                        subdoc[word_to_id[t]] = subdoc.get(word_to_id[t], 0) + 1
+                    if t in word_to_index:
+                        subdoc[word_to_index[t]] = subdoc.get(word_to_index[t], 0) + 1
                 if len(subdoc) > 0:
                     subdocs.append(subdoc)
                     times.append(time)

@@ -27,7 +27,8 @@ pip install -e /path/back/to/DETM
 If you have gzipped JSONL data where each line/object is a document with a text field "content" and time field "year", you can use the library somewhat like this:
 
 ```python
-from detm import DETM, Corpus, train_embeddings, filter_embeddings
+import torch
+from detm import xDETM, Corpus, train_embeddings, apply_model, train_model
 
 corpus = Corpus()
 
@@ -35,10 +36,10 @@ with gzip.open("my_data.jsonl.gz", "rt") as ifd:
     for line in enumerate(ifd):
         corpus.append(json.loads(line)
 
-embeddings = train_embeddings(corpus, content_field="content", max_subdoc_length=500, lowercase=True)
+embeddings = train_embeddings(corpus, content_field="content", max_subdoc_length=500, lowercase=True, random_seed=42)
 
 subdocs, times, word_list = corpus.get_filtered_subdocs(
-    max_subdoc_length=500,
+    max_subdoc_length=100,
     content_field="content",
     time_field="year",
     min_word_count=10,
@@ -46,21 +47,20 @@ subdocs, times, word_list = corpus.get_filtered_subdocs(
     lowercase=True
 )
 
-model = DETM(
+model = xDETM(
+    word_list=word_list,
     num_topics=50
     min_time=min(times),
     max_time=max(times),
-    window_size=25,
-    word_list=word_list,
-    embeddings=embeddings,
-    device="cuda"
+    window_size=50,
+    embeddings=embeddings
 )
 
 model.to("cuda")
 
 optimizer = torch.optim.Adam(
     model.parameters(),
-    lr=0.016,
+    lr=0.004,
     weight_decay=1.2e-6
 )
 
@@ -70,23 +70,30 @@ best_state = train_model(
     times=times,
     optimizer=optimizer,
     max_epochs=10,
+    batch_size=1024,
     device="cuda"
 )
 
 model.load_state_dict(best_state)
+```
 
-test_perplexity = perplexity_on_corpus(
+Note that training stability is sensitive to learning rate, which needs to be smaller as model size (topics, vocabulary, etc) increases: if you see NaN errors, try lowering the learning rate from the start (TODO: look into a reasonable formula for experimentally tuning this in the first epoch).
+
+Assuming you have loaded some other data to get different subdocs/times, you could then run:
+
+```
+test_labels, test_perplexity = apply_model(
     model,
-    some_other_corpus,
-    max_subdoc_length=500,
-    content_field="content",
-    time_field="year",
-    lowercase=True,
+    other_subdocs,
+    other_times,
+    batch_size=1024,
     device="cuda"
 )
 
 print(test_perplexity)
 ```
+
+Of course, with an unsupervised model, it may make sense to simply apply it back to the training data.
 
 Everything up to the point of our initial fork should be attributed to:
 
