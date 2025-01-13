@@ -14,10 +14,8 @@ class Corpus(list):
     def filter_for_model(
             self,
             model,
-            max_subdoc_length,
             content_field,
             time_field=None,
-            lowercase=True
     ):
         subdocs = []
         times = []
@@ -33,7 +31,7 @@ class Corpus(list):
                     dropped_because_timeless += 1
                     continue
 
-            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+            for subdoc_tokens in doc[content_field]:
                 subdoc = {}
                 for t in subdoc_tokens:
                     if t in word_to_index:
