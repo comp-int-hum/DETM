@@ -20,6 +20,7 @@ class cETM(AbstractDETM):
             min_time,
             max_time,
             word_list,
+            window_size,
 
             delta=0.005,
 

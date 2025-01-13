@@ -63,6 +63,10 @@ def train_model(
                 times_batch[i] = train_times[doc_id] #0 if idx > 0 else train_times[doc_id]
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
+
+            print(type(model))
+            
+
             data_batch = torch.from_numpy(data_batch).float()
             times_batch = torch.from_numpy(times_batch)
             sums = data_batch.sum(1).unsqueeze(1)
