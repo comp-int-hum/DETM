@@ -119,7 +119,7 @@ class DBDETM(AbstractDETM):
                 logsigma_t = self.logsigma_q_eta(inp_t)
                 etas[t] = self.reparameterize(mu_t, logsigma_t)
                 p_mu_t = etas[t-1]
-                logsigma_p_t = torch.log((last_logsigma + self.delta) * torch.ones(self.num_topics,).to(self.device))
+                logsigma_p_t = torch.log((torch.exp(last_logsigma) + (self.delta * torch.ones(self.num_topics,).to(self.device))))
                 last_logsigma = logsigma_t
                 kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
                 kl_eta.append(kl_t)
