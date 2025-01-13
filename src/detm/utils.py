@@ -106,7 +106,7 @@ def train_model(
                 lr = optimizer.param_groups[0]['lr']
                 if use_wandb:
                     wandb.log({
-                        "step": idx,
+                        "step": (idx) + epoch * len(indices),
                         "epoch": epoch + idx / len(indices),
                         "train/loss": cur_loss,
                         "train/nll": cur_nll,
