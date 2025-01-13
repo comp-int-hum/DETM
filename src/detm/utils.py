@@ -41,9 +41,10 @@ def train_model(
     since_annealing = 0
     since_improvement = 0
     
-    model.prepare_for_data(train_subdocs, train_times)
+    
     for epoch in range(1, max_epochs + 1):
         model.train(True)
+        model.prepare_for_data(train_subdocs, train_times)
         logger.info("Starting epoch %d", epoch)
         acc_loss = 0
         acc_nll = 0
