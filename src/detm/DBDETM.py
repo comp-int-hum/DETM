@@ -150,7 +150,7 @@ class DBDETM(AbstractDETM):
         sorted_times = sorted(document_times)
     
         total_documents = len(sorted_times)
-        window_size = math.ceil(total_documents / self.num_windows)  # Use ceil to ensure all docs are included
+        window_size = math.ceil(total_documents / self.num_windows)
         
         for i in range(0, total_documents, window_size):
             start_time = sorted_times[i]
