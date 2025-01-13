@@ -82,7 +82,7 @@ class DBDETM(AbstractDETM):
             logsigma_p_t = torch.log(torch.exp(self.logsigma_q_alpha[:, t-1, :]) + self.delta * self.centroid_difference[t-1] * torch.ones(self.num_topics, self.embedding_size).to(self.device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
-        print("kl_alpha", kl_alpha)
+        #print("kl_alpha", kl_alpha)
         return alphas[document_times], torch.stack(kl_alpha)
 
     def document_topic_mixture_priors(self, document_times):
@@ -126,7 +126,7 @@ class DBDETM(AbstractDETM):
             else:
                 etas[t] = mu_t
                 kl_eta.append(torch.tensor([]).to(self.device))
-        print("kl_eta", kl_eta)
+        #print("kl_eta", kl_eta)
         return etas[document_times], torch.stack(kl_eta)
     
     def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
@@ -143,7 +143,7 @@ class DBDETM(AbstractDETM):
         z = self.reparameterize(mu_theta, logsigma_theta)
         theta = torch.nn.functional.softmax(z, dim=-1)                
         kl_theta = self.get_kl(mu_theta, logsigma_theta, document_topic_mixture_priors, torch.zeros(self.num_topics).to(self.device))
-        print("kl_theta", kl_theta)
+        #print("kl_theta", kl_theta)
         return theta, kl_theta
 
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
