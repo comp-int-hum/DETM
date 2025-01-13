@@ -4,6 +4,7 @@ import random
 import torch
 import numpy
 from torch import autograd
+import wandb
 
 
 logger = logging.getLogger("utils")
@@ -20,7 +21,8 @@ def train_model(
         batch_size=32,
         device="cpu",
         val_proportion=0.2,
-        detect_anomalies=False
+        detect_anomalies=False,
+        use_wandb=False
 ):
     #times = [model.represent_time(t) for t in times]
     model = model.to(device)
@@ -94,6 +96,23 @@ def train_model(
             acc_kl_alpha_loss += torch.sum(kl_alpha).item()
             cnt += data_batch.shape[0]
 
+            if idx % 100 == 0:
+                cur_loss = round(acc_loss / cnt, 2) 
+                cur_nll = round(acc_nll / cnt, 2) 
+                cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
+                cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
+                cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
+                lr = optimizer.param_groups[0]['lr']
+                if use_wandb:
+                    wandb.log({
+                        "step": idx,
+                        "epoch": epoch + idx / len(indices),
+                        "train/loss": cur_loss,
+                        "train/nll": cur_nll,
+                        "train/kl_theta": cur_kl_theta,
+                        "train/kl_eta": cur_kl_eta,
+                        "train/kl_alpha": cur_kl_alpha
+                    })
         cur_loss = round(acc_loss / cnt, 2) 
         cur_nll = round(acc_nll / cnt, 2) 
         cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
@@ -122,6 +141,17 @@ def train_model(
                 val_ppl
             )
         )
+        if use_wandb:
+            wandb.log({
+                "step": (epoch+1) * len(indices),
+                "epoch": epoch +1,
+                "train/loss": cur_loss,
+                "train/nll": cur_nll,
+                "train/kl_theta": cur_kl_theta,
+                "train/kl_eta": cur_kl_eta,
+                "train/kl_alpha": cur_kl_alpha,
+                "val/ppl": val_ppl
+            })
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
@@ -153,7 +183,8 @@ def apply_model(
         times,
         batch_size=32,
         device="cpu",
-        detect_anomalies=False
+        detect_anomalies=False,
+        use_wandb=False
 ):
     model.train(False)
     # TODO change back
