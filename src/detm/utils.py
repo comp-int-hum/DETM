@@ -156,7 +156,8 @@ def apply_model(
         detect_anomalies=False
 ):
     model.train(False)
-    model.prepare_for_data(subdocs, times)
+    # TODO change back
+    #model.prepare_for_data(subdocs, times)
 
     ppl = 0
     cnt = 0
