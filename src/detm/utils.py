@@ -38,11 +38,11 @@ def train_model(
     best_val_ppl = float("inf")
     since_annealing = 0
     since_improvement = 0
-    model.train(True)
+    
     model.prepare_for_data(train_subdocs, train_times)
     for epoch in range(1, max_epochs + 1):
+        model.train(True)
         logger.info("Starting epoch %d", epoch)
-        
         acc_loss = 0
         acc_nll = 0
         acc_kl_theta_loss = 0
