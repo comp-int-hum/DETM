@@ -106,13 +106,13 @@ def train_model(
                 lr = optimizer.param_groups[0]['lr']
                 if use_wandb:
                     wandb.log({
-                        "step": (idx) + epoch * len(indices),
-                        "epoch": epoch + idx / len(indices),
+                        "step": (idx) + (epoch-1) * len(indices),
+                        "epoch": (epoch-1) + idx / len(indices),
                         "train/loss": torch.sum(loss).item() / data_batch.shape[0],
                         "train/nll": torch.sum(nll).item() / data_batch.shape[0],
                         "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
                         "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
-                        "train/kl_alpha": torch.sum(kl_alpha).item()
+                        "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
                     })
         cur_loss = round(acc_loss / cnt, 2) 
         cur_nll = round(acc_nll / cnt, 2) 
@@ -144,13 +144,13 @@ def train_model(
         )
         if use_wandb:
             wandb.log({
-                "step": (epoch+1) * len(indices),
-                "epoch": epoch +1,
+                "step": epoch * len(indices),
+                "epoch": epoch,
                 "train/loss": torch.sum(loss).item() / data_batch.shape[0],
                 "train/nll": torch.sum(nll).item() / data_batch.shape[0],
                 "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
                 "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
-                "train/kl_alpha": torch.sum(kl_alpha).item(),
+                "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0],
                 "val/ppl": val_ppl
             })
 
