@@ -31,6 +31,8 @@ class DBDETM(AbstractDETM):
         self.max_time = max_time
         self.min_time = min_time
 
+        self.embedding_size = embeddings.shape[1]
+
         self.window_size = window_size
         self.num_windows = math.ceil((max_time - min_time) / window_size)
 
