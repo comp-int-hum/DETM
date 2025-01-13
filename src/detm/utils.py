@@ -64,7 +64,12 @@ def train_model(
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
 
-            print(type(model))
+            # TODO find solution, preferra
+            """if "cETM" in str(type(model)):
+                #sort by time
+                sorted_indices = numpy.argsort(times_batch)
+                data_batch = data_batch[sorted_indices]
+                times_batch = times_batch[sorted_indices]"""
             
 
             data_batch = torch.from_numpy(data_batch).float()
