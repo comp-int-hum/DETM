@@ -249,17 +249,19 @@ class DETM(nn.Module):
         if get_lik:
             return self.get_lik(theta, beta)
         
-        nll = self.get_nll(theta, beta, bows)
+        nll = self.get_nll(theta, beta, normalized_bows)
 
         if self.training:
-            nll = nll.sum() * coeff
-            kl_theta = kl_theta.sum() * coeff
+            nll = nll.sum() / bsz
+            # * coeff
+            kl_theta = kl_theta.sum() / bsz
+            # * coeff
             nelbo = nll + kl_alpha + kl_eta + kl_theta
             return nelbo, nll, kl_alpha, kl_eta, kl_theta
         else:
-            sums = bows.sum(dim=1, keepdim=True)
-            loss = nll / sums.squeeze()
-            loss = loss.mean().item()
+            # sums = bows.sum(dim=1, keepdim=True)
+            # loss = nll / sums.squeeze()
+            loss = nll.mean().item()
             return loss
 
     def init_hidden(self):

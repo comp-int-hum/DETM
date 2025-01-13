@@ -68,11 +68,21 @@ class Trainer:
                 nelbo, nll, kl_alpha, kl_eta, kl_theta = self.model(data_batch, normalized_data_batch, 
                                                                     times_batch, rnn_input, 
                                                                     self.num_train)
-                self.train_acc_nelbo += torch.sum(nelbo).item()
-                self.train_acc_nll += torch.sum(nll).item()
-                self.train_acc_kl_alpha_loss += torch.sum(kl_alpha).item()
-                self.train_acc_kl_eta_loss += torch.sum(kl_eta).item()
-                self.train_acc_kl_theta_loss += torch.sum(kl_theta).item()
+                curr_nelbo = torch.sum(nelbo).item()
+                curr_nll = torch.sum(nll).item()
+                curr_kl_alpha = torch.sum(kl_alpha).item()
+                curr_kl_eta = torch.sum(kl_eta).item()
+                curr_kl_theta = torch.sum(kl_theta).item()
+                self.logger.info(
+                "KL_theta: {}, KL_eta: {}, KL_alpha: {}, Rec_loss: {}, NELBO: {}".format(
+                curr_kl_theta, curr_kl_eta, curr_kl_alpha, curr_nll, curr_nelbo
+                ))
+                
+                self.train_acc_nelbo += curr_nelbo
+                self.train_acc_nll += curr_nll
+                self.train_acc_kl_alpha_loss += curr_kl_alpha
+                self.train_acc_kl_eta_loss += curr_kl_eta
+                self.train_acc_kl_theta_loss += curr_kl_theta
                 self.train_cnt += 1
 
                 if not torch.any(torch.isnan(nelbo)):
@@ -138,6 +148,8 @@ class Trainer:
                 round(eval_ppl, 1)
             )
         )
+
+        self.epoch += 1
     
         if not self.best_eval_ppl or eval_ppl < self.best_eval_ppl:
             self.logger.info("Copying new best model...")
@@ -157,7 +169,7 @@ class Trainer:
             self.since_annealing = 0
         elif self.since_improvement >= self.early_stop:
             return False
-    
+        
         return True
 
     def get_best_model(self):
