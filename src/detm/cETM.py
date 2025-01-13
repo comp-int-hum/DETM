@@ -27,17 +27,14 @@ class cETM(AbstractDETM):
             alpha_hidden_size=800,
             alpha_nlayers=1,
             alpha_dropout=0.0,
-            alpha_act="relu",
 
             eta_hidden_size=800,
             eta_nlayers=1,
             eta_dropout=0.0,
-            eta_act="relu",
 
             theta_hidden_size=800,
             theta_nlayers=1,
             theta_dropout=0.0,
-            theta_act="relu",
     ):
         super(cETM, self).__init__(num_topics, word_list, embeddings)        
         self.max_time = max_time
@@ -46,17 +43,17 @@ class cETM(AbstractDETM):
         self.alpha_hidden_size = alpha_hidden_size
         self.alpha_nlayers = alpha_nlayers
         self.alpha_dropout = alpha_dropout
-        self.alpha_act = self.get_activation(alpha_act)
+        self.alpha_act = torch.nn.RReLU()
 
         self.theta_hidden_size = theta_hidden_size
         self.theta_nlayers = theta_nlayers
         self.theta_dropout = theta_dropout
-        self.theta_act = self.get_activation(theta_act)
+        self.theta_act = torch.nn.RReLU()
 
         self.eta_hidden_size = eta_hidden_size
         self.eta_nlayers = eta_nlayers
         self.eta_dropout = eta_dropout
-        self.eta_act = self.get_activation(eta_act)
+        self.eta_act = torch.nn.RReLU()
 
         self.delta = delta
 
