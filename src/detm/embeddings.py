@@ -1,15 +1,14 @@
 from gensim.models import Word2Vec
-import numpy
+from gensim.models.keyedvectors import KeyedVectors
+import gzip
     
 def load_embeddings(fname):
-    w2v = Word2Vec.load(fname)
-    return w2v
+    embeddings = KeyedVectors.load(fname)
+    return embeddings
     
-def train_embeddings(corpus, content_field, max_subdoc_length, lowercase=True, epochs=10, window_size=5, embedding_size=300, random_seed=None):
+def train_embeddings(corpus, content_field, epochs=10, window_size=5, embedding_size=300, random_seed=None):
     subdocs = corpus.get_tokenized_subdocs(
-        max_subdoc_length=max_subdoc_length,
         content_field=content_field,
-        lowercase=lowercase
     )
     model = Word2Vec(
         sentences=subdocs,
@@ -21,7 +20,8 @@ def train_embeddings(corpus, content_field, max_subdoc_length, lowercase=True, e
         epochs=epochs,
         seed=random_seed
     )
-    return model
+    return model.wv
 
 def save_embeddings(embeddings, fname):
-    embeddings.save(fname)
+    with gzip.open(fname, "wb") as ofd:
+        embeddings.save(ofd, separately=[])

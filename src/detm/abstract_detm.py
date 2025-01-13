@@ -11,7 +11,7 @@ class AbstractDETM(torch.nn.Module, ABC):
         self.word_list = word_list
         self.num_topics = num_topics
         self.device = "cpu"
-        embeddings_data = numpy.array([embeddings.wv[w] for w in self.word_list])
+        embeddings_data = numpy.array([embeddings[w] for w in self.word_list])
         num_embeddings, embeddings_size = embeddings_data.shape
         embeddings = torch.nn.Embedding(num_embeddings, embeddings_size)
         embeddings.weight.data = torch.tensor(embeddings_data)

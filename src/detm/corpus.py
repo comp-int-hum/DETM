@@ -11,15 +11,6 @@ class Corpus(list):
     """
     
     """
-        
-    def _split(self, text, max_subdoc_length, lowercase):
-        tokens = re.split(r"\s+", text.lower() if lowercase else text)
-        num_subdocs = math.ceil(len(tokens) / max_subdoc_length)
-        retval = []
-        for i in range(num_subdocs):
-            retval.append(tokens[i * max_subdoc_length : (i + 1) * max_subdoc_length])
-        return retval
-
     def filter_for_model(
             self,
             model,
@@ -56,24 +47,21 @@ class Corpus(list):
 
     def get_tokenized_subdocs(
             self,
-            max_subdoc_length,
             content_field,
             lowercase=True,
     ):
         retval = []
         for doc in self:
-            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
-                retval.append(subdoc_tokens)
+            for subdoc in doc[content_field]:
+                retval.append(subdoc)
         return retval
         
     def get_filtered_subdocs(
             self,
-            max_subdoc_length,
             content_field,
             time_field=None,
             min_word_count=1,
             max_word_proportion=1.0,
-            lowercase=True,
     ):
         
         word_subdoc_count = {}
@@ -86,7 +74,7 @@ class Corpus(list):
                 else:
                     continue # a time field was specified, but this doc has no value for it
 
-            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+            for subdoc_tokens in doc[content_field]:
                 for w in set(subdoc_tokens):
                     word_subdoc_count[w] = word_subdoc_count.get(w, 0) + 1
                 subdoc_count += 1
@@ -113,7 +101,7 @@ class Corpus(list):
                     dropped_because_timeless += 1
                     continue
 
-            for subdoc_tokens in self._split(doc[content_field], max_subdoc_length, lowercase):
+            for subdoc_tokens in doc[content_field]:
                 subdoc = {}
                 for t in subdoc_tokens:
                     if t in word_to_id:
