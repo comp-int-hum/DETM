@@ -11,7 +11,7 @@ import bisect
 logger = logging.getLogger("xdetm")
 
 
-class DBETM(AbstractDETM):
+class DBDETM(AbstractDETM):
     def __init__(
             self,
             num_topics,
@@ -27,7 +27,7 @@ class DBETM(AbstractDETM):
             eta_nlayers=3,
             delta=0.005,
     ):
-        super(DBETM, self).__init__(num_topics, word_list, embeddings)        
+        super(DBDETM, self).__init__(num_topics, word_list, embeddings)        
         self.max_time = max_time
         self.min_time = min_time
 
