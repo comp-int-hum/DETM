@@ -63,14 +63,14 @@ class cETM(AbstractDETM):
         self.mu_q_alpha = nn.ModuleList(
             [MLP(
                 in_channels=self.time_dimension, 
-                hidden_channels=[self.alpha_hidden_size] * self.alpha_nlayers + [self.rho_size], 
+                hidden_channels=[self.alpha_hidden_size] * self.alpha_nlayers + [self.embedding_size], 
                 dropout=self.alpha_dropout,
                 ) for _ in range(self.num_topics)]
         )
         self.logsigma_q_alpha = nn.ModuleList(
             [MLP(
                 in_channels=self.time_dimension, 
-                hidden_channels=[self.alpha_hidden_size] * self.alpha_nlayers + [self.rho_size], 
+                hidden_channels=[self.alpha_hidden_size] * self.alpha_nlayers + [self.embedding_size], 
                 dropout=self.alpha_dropout,
                 ) for _ in range(self.num_topics)]
         )
@@ -106,7 +106,7 @@ class cETM(AbstractDETM):
         num_times = document_times.size(0)
         time_diff = document_times[1:] - document_times[:-1]
 
-        alphas = torch.zeros(num_times, self.num_topics, self.rho_size, device=self.device)
+        alphas = torch.zeros(num_times, self.num_topics, self.embedding_size, device=self.device)
 
         # evaluate alpha at all time points within batch
         mu_q_alpha = [self.mu_q_alpha[i](document_times.unsqueeze(1)) for i in range(self.num_topics)]
@@ -120,7 +120,7 @@ class cETM(AbstractDETM):
         # calculate prior distribution
         # mu_p is the previous alpha, except for the first time point, where it is 0 (from DETM code)
         # (TODO: why is this? Do we actually want the first time slice to be close to 0? ask Tom)
-        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.rho_size, device=self.device), alphas[:-1]), dim=0)
+        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), alphas[:-1]), dim=0)
 
         # logsigma_p is the previous logsigma_q_alpha + delta * time_diff, except for the first time point, where it is 0 (sigma_p = 1)
         logsigma_p = torch.zeros_like(logsigma_q_alpha, device=self.device)
