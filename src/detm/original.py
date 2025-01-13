@@ -41,7 +41,8 @@ class DETM(nn.Module):
         self.num_windows = math.ceil((max_time - min_time) / window_size)
         self.t_hidden_size = t_hidden_size
         self.eta_hidden_size = eta_hidden_size
-
+        self.all_embeddings = [(w, embeddings.wv[w]) for w in embeddings.wv.index_to_key]
+        
         self.enc_drop = enc_drop
         self.eta_nlayers = eta_nlayers
         self.t_drop = nn.Dropout(enc_drop)

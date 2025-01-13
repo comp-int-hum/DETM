@@ -1,18 +1,15 @@
 from gensim.models import Word2Vec
-import torch
-import numpy
-
-
-def train_embeddings(corpus, content_field, max_subdoc_length, lowercase=True, epochs=10, window_size=5, embedding_size=300, random_seed=None):
-    subdocs, times, word_list = corpus.get_filtered_subdocs(
-        max_subdoc_length=max_subdoc_length,
-        content_field=content_field,
-        min_word_count=0,
-        max_word_proportion=1.0,
-        lowercase=lowercase,        
-    )
-    subdocs = [{word_list[k] : v for k, v in subdoc.items()} for subdoc in subdocs]
+from gensim.models.keyedvectors import KeyedVectors
+import gzip
     
+def load_embeddings(fname):
+    embeddings = KeyedVectors.load(fname)
+    return embeddings
+    
+def train_embeddings(corpus, content_field, epochs=10, window_size=5, embedding_size=300, random_seed=None):
+    subdocs = corpus.get_tokenized_subdocs(
+        content_field=content_field,
+    )
     model = Word2Vec(
         sentences=subdocs,
         vector_size=embedding_size,
@@ -23,16 +20,8 @@ def train_embeddings(corpus, content_field, max_subdoc_length, lowercase=True, e
         epochs=epochs,
         seed=random_seed
     )
-    return model
-
-
-def load_embeddings(fname):
-    return Word2Vec.load(fname)
-
+    return model.wv
 
 def save_embeddings(embeddings, fname):
-    embeddings.save(fname)
-
-
-def filter_embeddings(embeddings, word_list):
-    return torch.tensor(numpy.array([embeddings.wv[w] for w in word_list]))
+    with gzip.open(fname, "wb") as ofd:
+        embeddings.save(ofd, separately=[])
