@@ -40,8 +40,8 @@ class cETM(AbstractDETM):
         self.max_time = max_time
         self.min_time = min_time
 
-        self.num_windows = None
-        self.num_docs = None
+        self.num_windows = 0
+        self.num_docs = 0
 
         self.alpha_hidden_size = alpha_hidden_size
         self.alpha_nlayers = alpha_nlayers
@@ -106,6 +106,7 @@ class cETM(AbstractDETM):
         return (time - self.min_time) / (self.max_time - self.min_time)
 
     def topic_embeddings(self, document_times):
+        document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
         time_diff = document_times[1:] - document_times[:-1]
 
@@ -135,6 +136,7 @@ class cETM(AbstractDETM):
         return alphas, kl_alpha.sum().sum()
 
     def document_topic_mixture_priors(self, document_times):
+        document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
         time_diff = document_times[1:] - document_times[:-1]
 
@@ -156,16 +158,11 @@ class cETM(AbstractDETM):
         """Returns the topic proportions.
         """
         inp = torch.cat([document_word_counts, document_topic_mixture_priors], dim=1)
-        q_theta = self.q_theta(inp)
-        if self.enc_drop > 0 and self.training:
-            q_theta = self.t_drop(q_theta)
-        mu_theta = self.mu_q_theta(q_theta)
-        if not self.training:
-            return torch.nn.functional.softmax(mu_theta, dim=-1), torch.tensor([]).to(self.device)
-        logsigma_theta = self.logsigma_q_theta(q_theta)
+        mu_theta = self.mu_q_theta(inp)
+        logsigma_theta = self.logsigma_q_theta(inp)
         z = self.reparameterize(mu_theta, logsigma_theta)
-        theta = torch.nn.functional.softmax(z, dim=-1)                
-        kl_theta = self.get_kl(mu_theta, logsigma_theta, document_topic_mixture_priors, torch.zeros(self.num_topics).to(self.device))
+        theta = nn.functional.softmax(z, dim=-1)
+        kl_theta = self.get_kl(mu_theta, logsigma_theta, document_topic_mixture_priors, torch.zeros(self.num_topics, device=self.device))
         return theta, kl_theta
     
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
