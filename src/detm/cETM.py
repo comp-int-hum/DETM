@@ -167,3 +167,4 @@ class cETM(AbstractDETM):
     
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
         self.num_docs = len(document_word_counts)
+        self.num_windows = self.num_docs
