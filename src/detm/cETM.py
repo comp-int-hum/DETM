@@ -40,6 +40,9 @@ class cETM(AbstractDETM):
         self.max_time = max_time
         self.min_time = min_time
 
+        self.num_windows = None
+        self.num_docs = None
+
         self.alpha_hidden_size = alpha_hidden_size
         self.alpha_nlayers = alpha_nlayers
         self.alpha_dropout = alpha_dropout
