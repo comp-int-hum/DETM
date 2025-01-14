@@ -162,7 +162,7 @@ class DBDETM(AbstractDETM):
         
         self.window_list_starts = [self.window_list[i][0] for i in range(len(self.window_list))]
         self.window_centroids = [(self.window_list[i][0] + self.window_list[i][0])/2 for i in range(self.num_windows)]
-        self.centroid_difference = torch.tensor(self.window_centroids[1:]) - torch.tensor(self.window_centroids[:-1])
+        self.centroid_difference = torch.tensor(self.window_centroids[1:]) - torch.tensor(self.window_centroids[:-1])/self.window_size
 
         print("Window list", self.window_list)
         print("Window list starts", self.window_list_starts)
