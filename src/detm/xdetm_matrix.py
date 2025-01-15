@@ -76,16 +76,12 @@ class xDETMm(AbstractDETM):
         # calculate prior distribution
         # mu_p is the previous alpha, except for the first time point, where it is 0 (from DETM code)
         # (TODO: why is this? Do we actually want the first time slice to be close to 0? ask Tom)
-        print(alphas.size())
-        print(alphas[:-1].size())
-        print(torch.zeros(1, self.num_topics, self.embedding_size, device=self.device).size())
 
         mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), alphas[:-1]), dim=0)
 
         # logsigma_p is the previous logsigma_q_alpha + delta * time_diff, except for the first time point, where it is 0 (sigma_p = 1)
         logsigma_p = torch.zeros_like(logsigma_q_alpha, device=self.device)
-        time_diff_expanded = (self.delta).unsqueeze(-1).unsqueeze(-1)
-        logsigma_p[1:] = torch.log(time_diff_expanded)
+        logsigma_p[1:] = torch.log(torch.ones_like(logsigma_p[1:], device=self.device) * self.delta)
 
         # calculate KL divergence
         kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
