@@ -104,6 +104,7 @@ class DBDETM(AbstractDETM):
         if self.training:
             logsigma_0 = self.logsigma_q_eta(inp_0)
             last_logsigma = logsigma_0
+            last_mu = mu_0
             etas[0] = self.reparameterize(mu_0, logsigma_0)
             p_mu_0 = torch.zeros(self.num_topics,).to(self.device)
             logsigma_p_0 = torch.zeros(self.num_topics,).to(self.device)
@@ -118,10 +119,11 @@ class DBDETM(AbstractDETM):
             if self.training:
                 logsigma_t = self.logsigma_q_eta(inp_t)
                 etas[t] = self.reparameterize(mu_t, logsigma_t)
-                p_mu_t = etas[t-1]
+                p_mu_t = last_mu
                 logsigma_p_t = torch.log((torch.exp(last_logsigma) + (self.delta * torch.ones(self.num_topics,).to(self.device))))
                 last_logsigma = logsigma_t
                 kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
+                last_mu = mu_t
                 kl_eta.append(kl_t)
             else:
                 etas[t] = mu_t
