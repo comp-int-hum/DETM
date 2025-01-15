@@ -27,6 +27,10 @@ class AbstractDETM(torch.nn.Module, ABC):
         in relation to, etc.
         """
         pass
+
+    @abstractmethod
+    def evenly_spaced_time_representations(self, step=1):
+        pass
     
     @abstractmethod
     def topic_embeddings(self, document_times):
@@ -52,7 +56,13 @@ class AbstractDETM(torch.nn.Module, ABC):
     def prepare_for_data(self, document_word_counts, document_times):
         pass
 
-    def topic_distributions(self, topic_embeddings):
+    def combine_losses(self, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld):
+        return reconstruction_loss.sum() + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum()
+    
+    def topic_distributions(self, topic_embeddings=None):
+        if topic_embeddings == None:
+            time_representations = self.evenly_spaced_time_representations()
+            topic_embeddings, _ = self.topic_embeddings(time_representations)
         tmp = topic_embeddings.view(topic_embeddings.size(0)*topic_embeddings.size(1), self.embeddings.shape[1])
         logit = torch.mm(tmp, self.embeddings.permute(1, 0)) 
         logit = logit.view(topic_embeddings.size(0), topic_embeddings.size(1), -1)
@@ -108,7 +118,7 @@ class AbstractDETM(torch.nn.Module, ABC):
             topic_distributions,
             document_word_counts
         )
-        nelbo = reconstruction_loss.sum() + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum()
+        nelbo = self.combine_losses(reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld)
         return (nelbo, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld)
     
     @property
@@ -124,3 +134,9 @@ class AbstractDETM(torch.nn.Module, ABC):
         self.device = device
         return super().to(device)    
     
+    #def (self, time_representations, count=5):
+    #    topic_embeddings, _ = self.topic_embeddings(time_representations)
+    #    topic_distributions = self.topic_distributions(topic_embeddings)
+    #    
+    #    print(topic_distributions.shape)
+    #    return []

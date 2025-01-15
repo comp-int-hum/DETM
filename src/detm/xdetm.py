@@ -62,6 +62,9 @@ class xDETM(AbstractDETM):
     def represent_time(self, time):
         return int((time - self.min_time) / self.window_size)
 
+    def evenly_spaced_time_representations(self, step=1):
+        return torch.arange(0, self.num_windows, step)
+    
     def topic_embeddings(self, document_times):
         alphas = torch.zeros(self.num_windows, self.num_topics, self.embedding_size).to(self.device)
         kl_alpha = []
