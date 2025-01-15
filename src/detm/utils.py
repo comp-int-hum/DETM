@@ -181,8 +181,7 @@ def apply_model(
         use_wandb=False
 ):
     model.train(False)
-    # TODO change back
-    #model.prepare_for_data(subdocs, times)
+    model.prepare_for_data(subdocs, times)
 
     ppl = 0
     cnt = 0
