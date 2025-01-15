@@ -5,13 +5,12 @@ import logging
 import torch
 import numpy
 from .abstract_detm import AbstractDETM
-import bisect
 
 
 logger = logging.getLogger("xdetm")
 
 
-class DBDETM(AbstractDETM):
+class xDETMm(AbstractDETM):
     def __init__(
             self,
             num_topics,
@@ -27,13 +26,11 @@ class DBDETM(AbstractDETM):
             eta_nlayers=3,
             delta=0.005,
     ):
-        super(DBDETM, self).__init__(num_topics, word_list, embeddings)        
+        super(xDETMm, self).__init__(num_topics, word_list, embeddings)        
         self.max_time = max_time
         self.min_time = min_time
-
         self.window_size = window_size
         self.num_windows = math.ceil((max_time - min_time) / window_size)
-
         self.t_hidden_size = t_hidden_size
         self.eta_hidden_size = eta_hidden_size
         self.enc_drop = enc_drop
@@ -63,10 +60,7 @@ class DBDETM(AbstractDETM):
         logger.info("%d windows, %d topics, %d words", self.num_windows, self.num_topics, self.vocab_size)
         
     def represent_time(self, time):
-        index = bisect.bisect_right(self.window_list_starts, time) - 1
-        if index >= 0:
-            return index
-        return 0
+        return int((time - self.min_time) / self.window_size)
 
     def topic_embeddings(self, document_times):
         alphas = torch.zeros(self.num_windows, self.num_topics, self.embedding_size).to(self.device)
@@ -78,7 +72,7 @@ class DBDETM(AbstractDETM):
         kl_alpha.append(kl_0)
         for t in range(1, self.num_windows):
             alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
-            p_mu_t = self.mu_q_alpha[:, t-1, :]
+            p_mu_t = alphas[t-1]
             logsigma_p_t = torch.log(torch.exp(self.logsigma_q_alpha[:, t-1, :]) + self.delta * self.centroid_difference[t-1] * torch.ones(self.num_topics, self.embedding_size).to(self.device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
@@ -99,11 +93,8 @@ class DBDETM(AbstractDETM):
         kl_eta = []
         inp_0 = torch.cat([output[0], torch.zeros(self.num_topics,).to(self.device)], dim=0)
         mu_0 = self.mu_q_eta(inp_0)
-
-        last_logsigma = torch.zeros(self.num_topics,).to(self.device)
         if self.training:
             logsigma_0 = self.logsigma_q_eta(inp_0)
-            last_logsigma = logsigma_0
             etas[0] = self.reparameterize(mu_0, logsigma_0)
             p_mu_0 = torch.zeros(self.num_topics,).to(self.device)
             logsigma_p_0 = torch.zeros(self.num_topics,).to(self.device)
@@ -119,14 +110,12 @@ class DBDETM(AbstractDETM):
                 logsigma_t = self.logsigma_q_eta(inp_t)
                 etas[t] = self.reparameterize(mu_t, logsigma_t)
                 p_mu_t = etas[t-1]
-                logsigma_p_t = torch.log((torch.exp(last_logsigma) + (self.delta * torch.ones(self.num_topics,).to(self.device))))
-                last_logsigma = logsigma_t
+                logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
                 kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
                 kl_eta.append(kl_t)
             else:
                 etas[t] = mu_t
                 kl_eta.append(torch.tensor([]).to(self.device))
-        #print("kl_eta", kl_eta)
         return etas[document_times], torch.stack(kl_eta)
     
     def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
@@ -143,32 +132,10 @@ class DBDETM(AbstractDETM):
         z = self.reparameterize(mu_theta, logsigma_theta)
         theta = torch.nn.functional.softmax(z, dim=-1)                
         kl_theta = self.get_kl(mu_theta, logsigma_theta, document_topic_mixture_priors, torch.zeros(self.num_topics).to(self.device))
-        #print("kl_theta", kl_theta)
         return theta, kl_theta
 
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
         self.num_docs = len(document_word_counts)
-
-        self.window_list = []
-        sorted_times = sorted(document_times)
-    
-        total_documents = len(sorted_times)
-        window_size = math.ceil(total_documents / self.num_windows)
-        
-        for i in range(0, total_documents, window_size):
-            start_time = sorted_times[i]
-            end_time = sorted_times[min(i + window_size, total_documents) - 1]
-            self.window_list.append((start_time, end_time))
-        
-        self.window_list_starts = [self.window_list[i][0] for i in range(len(self.window_list))]
-        self.window_centroids = [(self.window_list[i][0] + self.window_list[i][0])/2 for i in range(self.num_windows)]
-        self.centroid_difference = torch.tensor(self.window_centroids[1:]) - torch.tensor(self.window_centroids[:-1])/self.window_size
-
-        print("Window list", self.window_list)
-        print("Window list starts", self.window_list_starts)
-        print("Window centroids", self.window_centroids)
-        print("Centroid difference", self.centroid_difference)
-
         document_times = [self.represent_time(t) for t in document_times]
         window_count = self.num_windows
         indices = torch.arange(0, len(document_word_counts), dtype=torch.int)
