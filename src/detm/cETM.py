@@ -124,7 +124,7 @@ class cETM(AbstractDETM):
         # calculate prior distribution
         # mu_p is the previous alpha, except for the first time point, where it is 0 (from DETM code)
         # (TODO: why is this? Do we actually want the first time slice to be close to 0? ask Tom)
-        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), alphas[:-1]), dim=0)
+        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), mu_q_alpha[:-1]), dim=0)
 
         # logsigma_p is the previous logsigma_q_alpha + delta * time_diff, except for the first time point, where it is 0 (sigma_p = 1)
         logsigma_p = torch.zeros_like(logsigma_q_alpha, device=self.device)
