@@ -90,6 +90,22 @@ class AbstractDETM(torch.nn.Module, ABC):
         else:
             return mu
 
+    def get_likelihood(self, document_word_counts, document_times):
+        document_word_counts = document_word_counts.to(self.device)
+        document_times = document_times.to(self.device)
+        document_time_representations = torch.tensor([self.represent_time(t) for t in document_times]).to(self.device)
+        normalized_document_word_counts = document_word_counts / document_word_counts.sum(1).unsqueeze(1).to(self.device)
+        topic_embeddings, _ = self.topic_embeddings(document_time_representations) # alpha
+        document_topic_mixture_priors, _ = self.document_topic_mixture_priors(document_time_representations) # eta
+        document_topic_mixtures, _ = self.document_topic_mixtures(
+            document_topic_mixture_priors,
+            normalized_document_word_counts,
+            document_time_representations
+        ) # theta
+        topic_distributions = self.topic_distributions(topic_embeddings) # beta
+        likelihood = document_topic_mixtures.unsqueeze(2) * topic_distributions
+        return likelihood
+
     def forward(self, document_word_counts, document_times):
         document_word_counts = document_word_counts.to(self.device)
         document_times = document_times.to(self.device)

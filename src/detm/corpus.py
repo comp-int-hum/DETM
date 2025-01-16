@@ -19,6 +19,7 @@ class Corpus(list):
     ):
         subdocs = []
         times = []
+        auxiliaries = []
         word_to_index = {w : i for i, w in enumerate(model.word_list)}
         dropped_because_empty = 0
         dropped_because_timeless = 0
@@ -41,7 +42,11 @@ class Corpus(list):
                     times.append(time)
                 else:
                     dropped_because_empty += 1
-        return (subdocs, times)
+
+            doc_auxiliary = {k: doc[k] for k in doc.keys() - {content_field}}
+            auxiliaries.append(doc_auxiliary)
+
+        return (subdocs, times, auxiliaries)
 
     def get_tokenized_subdocs(
             self,
