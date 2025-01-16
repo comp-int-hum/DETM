@@ -148,7 +148,7 @@ class cETM(AbstractDETM):
     def document_topic_mixture_priors(self, document_times):
         document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
-        time_diff = document_times[1:] - document_times[:-1]
+        time_diff = torch.abs(document_times[1:] - document_times[:-1])
 
         etas = torch.zeros(num_times, self.num_topics, device=self.device)
         
