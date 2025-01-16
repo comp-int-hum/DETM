@@ -179,7 +179,10 @@ class cETM(AbstractDETM):
         logsigma_p[1:] = torch.log(1e-6 + time_diff_expanded)
         
         mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), etas[:-1]), dim=0)
-        kl_eta = self.get_kl(mu_q, logsigma_q, mu_p, logsigma_p)
+        mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), mu_q[:-1]), dim=0)
+
+        kl_eta = self.calculate_expected_kl(mu_q, logsigma_q, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
+        #kl_eta = self.get_kl(mu_q, logsigma_q, mu_p, logsigma_p)
 
         if torch.isnan(kl_eta).any():
             logger.error("kl_eta contains NaN")
