@@ -63,15 +63,12 @@ class xDETMm(AbstractDETM):
         return int((time - self.min_time) / self.window_size)
 
     def topic_embeddings(self, document_times):
-
-        alphas = torch.zeros(self.num_windows, self.num_topics, self.embedding_size, device=self.device)
-
         # evaluate alpha at all time points within batch
-        mu_q_alpha = self.mu_q_alpha.permute(1, 0, 2)
-        logsigma_q_alpha = self.logsigma_q_alpha.permute(1, 0, 2)
+        mu_q_alpha = self.mu_q_alpha.permute(1, 0, 2) # (num_topics, num_windows, embedding_size) --> (num_windows, num_topics, embedding_size)
+        logsigma_q_alpha = self.logsigma_q_alpha.permute(1, 0, 2) # (num_topics, num_windows, embedding_size) --> (num_windows, num_topics, embedding_size)
 
         # reparameterize
-        alphas = self.reparameterize(mu_q_alpha, logsigma_q_alpha)
+        alphas = self.reparameterize(mu_q_alpha, logsigma_q_alpha) # (num_windows, num_topics, embedding_size)
 
         # calculate prior distribution
         # mu_p is the previous alpha, except for the first time point, where it is 0 (from DETM code)
@@ -79,13 +76,13 @@ class xDETMm(AbstractDETM):
 
         mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), alphas[:-1]), dim=0)
 
-        # logsigma_p is the previous logsigma_q_alpha + delta * time_diff, except for the first time point, where it is 0 (sigma_p = 1)
+        # logsigma_p is 0 (variace = 1) for timeslice 0, and delta for the rest
         logsigma_p = torch.zeros_like(logsigma_q_alpha, device=self.device)
         logsigma_p[1:] = torch.log(torch.ones_like(logsigma_p[1:], device=self.device) * self.delta)
 
         # calculate KL divergence
         kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
-        return alphas, kl_alpha.sum().sum()
+        return alphas[document_times], kl_alpha.sum()
 
     def document_topic_mixture_priors(self, document_times):
         inp = self.q_eta_map(self.rnn_input).unsqueeze(1)

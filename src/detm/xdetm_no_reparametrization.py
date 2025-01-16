@@ -72,7 +72,7 @@ class xDETMnr(AbstractDETM):
         kl_alpha.append(kl_0)
         for t in range(1, self.num_windows):
             alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
-            p_mu_t = self.mu_q_alpha[:, t -1, :]
+            p_mu_t = self.mu_q_alpha[:, t-1, :]
             logsigma_p_t = torch.log(torch.exp(self.logsigma_q_alpha[:, t-1, :]) + self.delta * torch.ones(self.num_topics, self.embedding_size).to(self.device)) #torch.log(self.delta * torch.ones(self.num_topics, self.embedding_size).to(self.device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
