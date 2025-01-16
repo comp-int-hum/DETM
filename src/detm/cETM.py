@@ -106,7 +106,7 @@ class cETM(AbstractDETM):
         return (time - self.min_time) / (self.max_time - self.min_time)
 
     
-    def calculate_expected_kl(mu_q, logsigma_q, 
+    def calculate_expected_kl(self, mu_q, logsigma_q, 
                             mu_p, logsigma_p, 
                             logdelta):
         # Convert log-sigmas to variances
