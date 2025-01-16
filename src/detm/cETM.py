@@ -162,6 +162,17 @@ class cETM(AbstractDETM):
         
         mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), etas[:-1]), dim=0)
         kl_eta = self.get_kl(mu_q, logsigma_q, mu_p, logsigma_p)
+
+        if torch.isnan(kl_eta).any():
+            logger.error("kl_eta contains NaN")
+            print(f"mu_q: {mu_q}")
+            print(f"logsigma_q: {logsigma_q}")
+            print(f"mu_p: {mu_p}")
+            print(f"logsigma_p: {logsigma_p}")
+            print(f"kl_eta: {kl_eta}")
+            print(f"etas: {etas}")
+            print(f"time_diff: {time_diff}")
+            raise ValueError("kl_eta contains NaN")
         return etas, kl_eta.sum()
 
     def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
