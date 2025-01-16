@@ -110,8 +110,8 @@ class cETM(AbstractDETM):
                             mu_p, logsigma_p, 
                             logdelta):
         # Convert log-sigmas to variances
-        sigma_q_2 = torch.exp(2.0*logsigma_q)
-        sigma_p_2 = torch.exp(2.0*logsigma_p)
+        sigma_q_2 = torch.exp(logsigma_q)
+        sigma_p_2 = torch.exp(logsigma_p)
         delta      = torch.exp(logdelta)
 
         term1 = torch.pow((mu_q - mu_p), 2) + sigma_q_2 + sigma_p_2
