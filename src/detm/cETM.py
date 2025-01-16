@@ -108,7 +108,7 @@ class cETM(AbstractDETM):
     def topic_embeddings(self, document_times):
         document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
-        time_diff = document_times[1:] - document_times[:-1]
+        time_diff = torch.abs(document_times[1:] - document_times[:-1])
 
         alphas = torch.zeros(num_times, self.num_topics, self.embedding_size, device=self.device)
 
