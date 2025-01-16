@@ -105,6 +105,21 @@ class cETM(AbstractDETM):
     def represent_time(self, time):
         return (time - self.min_time) / (self.max_time - self.min_time)
 
+    
+    def calculate_expected_kl(mu_q, logsigma_q, 
+                            mu_p, logsigma_p, 
+                            logdelta):
+        # Convert log-sigmas to variances
+        sigma_q_2 = torch.exp(2.0*logsigma_q)
+        sigma_p_2 = torch.exp(2.0*logsigma_p)
+        delta      = torch.exp(logdelta)
+
+        term1 = torch.pow((mu_q - mu_p), 2) + sigma_q_2 + sigma_p_2
+        term2 = (delta/sigma_q_2)
+
+        return 0.5* (term1/delta -1 + torch.log(term2))
+
+
     def topic_embeddings(self, document_times):
         document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
@@ -131,8 +146,11 @@ class cETM(AbstractDETM):
         time_diff_expanded = (self.delta * time_diff).unsqueeze(-1).unsqueeze(-1)
         logsigma_p[1:] = torch.log(1e-6 + time_diff_expanded)
 
+        # TODO switch back to normal kl someday
+        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), mu_q_alpha[:-1]), dim=0)
         # calculate KL divergence
-        kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
+        #kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
+        kl_alpha = self.calculate_expected_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
         if torch.isnan(kl_alpha).any():
             logger.error("kl_alpha contains NaN")
             print(f"mu_q_alpha: {mu_q_alpha}")
