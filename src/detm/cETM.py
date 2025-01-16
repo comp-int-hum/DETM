@@ -144,13 +144,15 @@ class cETM(AbstractDETM):
         # logsigma_p is the previous logsigma_q_alpha + delta * time_diff, except for the first time point, where it is 0 (sigma_p = 1)
         logsigma_p = torch.zeros_like(logsigma_q_alpha, device=self.device)
         time_diff_expanded = (self.delta * time_diff).unsqueeze(-1).unsqueeze(-1)
-        logsigma_p[1:] = torch.log(1e-6 + time_diff_expanded)
+        logsigma_p[1:] = torch.log(0.02 + time_diff_expanded)
 
         # TODO switch back to normal kl someday
-        mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), mu_q_alpha[:-1]), dim=0)
+        #mu_p = torch.cat((torch.zeros(1, self.num_topics, self.embedding_size, device=self.device), mu_q_alpha[:-1]), dim=0)
+        #kl_alpha = self.calculate_expected_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
+
         # calculate KL divergence
-        #kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
-        kl_alpha = self.calculate_expected_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
+        kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
+
         if torch.isnan(kl_alpha).any():
             logger.error("kl_alpha contains NaN")
             print(f"mu_q_alpha: {mu_q_alpha}")
@@ -176,13 +178,13 @@ class cETM(AbstractDETM):
         etas = self.reparameterize(mu_q, logsigma_q)
         logsigma_p = torch.zeros_like(logsigma_q, device=self.device)
         time_diff_expanded = (self.delta * time_diff).unsqueeze(-1)
-        logsigma_p[1:] = torch.log(1e-6 + time_diff_expanded)
+        logsigma_p[1:] = torch.log(0.02 + time_diff_expanded)
         
         mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), etas[:-1]), dim=0)
-        mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), mu_q[:-1]), dim=0)
+        #mu_p = torch.cat((torch.zeros(1, self.num_topics, device=self.device), mu_q[:-1]), dim=0)
 
-        kl_eta = self.calculate_expected_kl(mu_q, logsigma_q, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
-        #kl_eta = self.get_kl(mu_q, logsigma_q, mu_p, logsigma_p)
+        #kl_eta = self.calculate_expected_kl(mu_q, logsigma_q, mu_p, logsigma_p, torch.log(torch.tensor(self.delta, device=self.device)))
+        kl_eta = self.get_kl(mu_q, logsigma_q, mu_p, logsigma_p)
 
         if torch.isnan(kl_eta).any():
             logger.error("kl_eta contains NaN")
