@@ -133,6 +133,16 @@ class cETM(AbstractDETM):
 
         # calculate KL divergence
         kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
+        if torch.isnan(kl_alpha).any():
+            logger.error("kl_alpha contains NaN")
+            print(f"mu_q_alpha: {mu_q_alpha}")
+            print(f"logsigma_q_alpha: {logsigma_q_alpha}")
+            print(f"mu_p: {mu_p}")
+            print(f"logsigma_p: {logsigma_p}")
+            print(f"kl_alpha: {kl_alpha}")
+            print(f"alphas: {alphas}")
+            print(f"time_diff: {time_diff}")
+            raise ValueError("kl_alpha contains NaN")
         return alphas, kl_alpha.sum()
 
     def document_topic_mixture_priors(self, document_times):
