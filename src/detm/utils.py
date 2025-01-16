@@ -448,10 +448,10 @@ def get_top_topic_info(matrice, top_n=5):
             data_window_topic, id2data = matrice[data_window_topic_col], matrice[id2data_col]
             return_data = {}
 
-            data_dist_per_top = (data_window_topic.transpose(2, 0, 1) / 
+            topic_dist_per_data = (data_window_topic.transpose(2, 0, 1) / 
                                    (data_window_topic.sum(2) + epsilon)).transpose(1, 2, 0)
 
-            topic_dist_per_data = data_window_topic / (data_window_topic.sum(0) + epsilon)
+            data_dist_per_top = data_window_topic / (data_window_topic.sum(0) + epsilon)
 
             const_str = "Data proportion in single topic "
 
