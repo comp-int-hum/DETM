@@ -29,7 +29,7 @@ class AbstractDETM(torch.nn.Module, ABC):
         pass
 
     @abstractmethod
-    def evenly_spaced_time_representations(self, step=1):
+    def evenly_spaced_times(self, step=1):
         pass
     
     @abstractmethod
@@ -61,7 +61,7 @@ class AbstractDETM(torch.nn.Module, ABC):
     
     def topic_distributions(self, topic_embeddings=None):
         if topic_embeddings == None:
-            time_representations = self.evenly_spaced_time_representations()
+            time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
             topic_embeddings, _ = self.topic_embeddings(time_representations)
         tmp = topic_embeddings.view(topic_embeddings.size(0)*topic_embeddings.size(1), self.embeddings.shape[1])
         logit = torch.mm(tmp, self.embeddings.permute(1, 0)) 
@@ -129,6 +129,12 @@ class AbstractDETM(torch.nn.Module, ABC):
     def embedding_size(self):
         return self.embeddings.shape[1]
 
+    def time_mixtures(self):
+        time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
+        logit, _ = self.document_topic_mixture_priors(time_representations)
+        dists = torch.nn.functional.softmax(logit, dim=-1)
+        return dists.detach().to("cpu")
+    
     def to(self, device):
         self.embeddings = self.embeddings.to(device)
         self.device = device
