@@ -4,6 +4,7 @@ import random
 import torch
 import numpy
 from torch import autograd
+import wandb
 
 
 logger = logging.getLogger("utils")
@@ -20,7 +21,8 @@ def train_model(
         batch_size=32,
         device="cpu",
         val_proportion=0.2,
-        detect_anomalies=False
+        detect_anomalies=False,
+        use_wandb=False
 ):
     #times = [model.represent_time(t) for t in times]
     model = model.to(device)
@@ -38,11 +40,12 @@ def train_model(
     best_val_ppl = float("inf")
     since_annealing = 0
     since_improvement = 0
+    
+    
     for epoch in range(1, max_epochs + 1):
-        logger.info("Starting epoch %d", epoch)
         model.train(True)
         model.prepare_for_data(train_subdocs, train_times)
-        
+        logger.info("Starting epoch %d", epoch)
         acc_loss = 0
         acc_nll = 0
         acc_kl_theta_loss = 0
@@ -63,6 +66,15 @@ def train_model(
                 times_batch[i] = train_times[doc_id] #0 if idx > 0 else train_times[doc_id]
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
+
+            # TODO find solution, preferra
+            """if "cETM" in str(type(model)):
+                #sort by time
+                sorted_indices = numpy.argsort(times_batch)
+                data_batch = data_batch[sorted_indices]
+                times_batch = times_batch[sorted_indices]"""
+            
+
             data_batch = torch.from_numpy(data_batch).float()
             times_batch = torch.from_numpy(times_batch)
             sums = data_batch.sum(1).unsqueeze(1)
@@ -85,6 +97,23 @@ def train_model(
             acc_kl_alpha_loss += torch.sum(kl_alpha).item()
             cnt += data_batch.shape[0]
 
+            if idx % 100 == 0:
+                cur_loss = round(acc_loss / cnt, 2) 
+                cur_nll = round(acc_nll / cnt, 2) 
+                cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
+                cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
+                cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
+                lr = optimizer.param_groups[0]['lr']
+                if use_wandb:
+                    wandb.log({
+                        "step": (idx) + (epoch-1) * len(indices),
+                        "epoch": (epoch-1) + idx / len(indices),
+                        "train/loss": torch.sum(loss).item() / data_batch.shape[0],
+                        "train/nll": torch.sum(nll).item() / data_batch.shape[0],
+                        "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
+                        "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
+                        "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
+                    })
         cur_loss = round(acc_loss / cnt, 2) 
         cur_nll = round(acc_nll / cnt, 2) 
         cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
@@ -113,6 +142,10 @@ def train_model(
                 val_ppl
             )
         )
+        if use_wandb:
+            wandb.log({
+                "val/ppl": val_ppl
+            })
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
@@ -144,7 +177,8 @@ def apply_model(
         times,
         batch_size=32,
         device="cpu",
-        detect_anomalies=False
+        detect_anomalies=False,
+        use_wandb=False
 ):
     model.train(False)
     model.prepare_for_data(subdocs, times)
