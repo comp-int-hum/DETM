@@ -68,11 +68,13 @@ def train_model(
                     data_batch[i, k] = v
 
             # TODO find solution, preferra
-            """if "cETM" in str(type(model)):
+            if "cETM" in str(type(model)):
                 #sort by time
+                if idx == 0:
+                    print('sorting, because model is cETM')
                 sorted_indices = numpy.argsort(times_batch)
                 data_batch = data_batch[sorted_indices]
-                times_batch = times_batch[sorted_indices]"""
+                times_batch = times_batch[sorted_indices]
             
 
             data_batch = torch.from_numpy(data_batch).float()
