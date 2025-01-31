@@ -159,3 +159,5 @@ class xDETM(AbstractDETM):
                 rnn_input[t] += docs
                 cnt[t] += len(tmp)
         self.rnn_input = rnn_input / cnt.unsqueeze(1)
+        nan_indices = torch.isnan(self.rnn_input).nonzero(as_tuple=True)
+        logger.info(f"NaN values found at window: {set(nan_indices[0].tolist())}")

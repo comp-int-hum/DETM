@@ -4,6 +4,7 @@ import random
 import torch
 import numpy
 from torch import autograd
+from collections import Counter
 
 
 logger = logging.getLogger("utils")
@@ -33,6 +34,9 @@ def train_model(
 
     train_times = [x for _, x in pairs[int(val_proportion*len(times)):]]
     val_times = [x for _, x in pairs[:int(val_proportion*len(times))]]
+
+    train_time_wins = [int((time_instance - model.min_time) / model.window_size) for time_instance in train_times]
+    logger.info(Counter(train_time_wins))
     
     best_state = copy.deepcopy(model.state_dict())
     best_val_ppl = float("inf")
@@ -42,6 +46,7 @@ def train_model(
         logger.info("Starting epoch %d", epoch)
         model.train(True)
         model.prepare_for_data(train_subdocs, train_times)
+        return None
         
         acc_loss = 0
         acc_nll = 0

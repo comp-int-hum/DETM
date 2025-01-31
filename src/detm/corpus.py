@@ -58,6 +58,7 @@ class Corpus(list):
             self,
             content_field,
             time_field=None,
+            time_reg=None,
             min_word_count=1,
             max_word_proportion=1.0,
     ):
@@ -69,6 +70,10 @@ class Corpus(list):
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
                     time = float(time)
+                    
+                    # in case a filtering is done
+                    if (time_reg[0] and time < time_reg[0]) or (time_reg[1] and time >= time_reg[1]):
+                        continue
                 else:
                     continue # a time field was specified, but this doc has no value for it
 
@@ -83,7 +88,6 @@ class Corpus(list):
                 word_to_id[k] = len(word_to_id)
 
         unique_times = set()
-        unique_tokens = set()
         subdocs = []
         times = []
         dropped_because_empty = 0
@@ -93,7 +97,9 @@ class Corpus(list):
             if time_field != None:
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
-                    time = float(time)                    
+                    time = float(time)  
+                    if (time_reg[0] and time < time_reg[0]) or (time_reg[1] and time >= time_reg[1]):
+                        continue                  
                     unique_times.add(time)
                 else:
                     dropped_because_timeless += 1
@@ -124,4 +130,7 @@ class Corpus(list):
             len(word_to_id)
         )
 
-        return (subdocs, times, [t for _, t in sorted([(i, w) for w, i in word_to_id.items()])])
+        return (subdocs, times,
+                [t for _, t in sorted([(i, w) for w, i in word_to_id.items()])], 
+                (time_reg[0] if time_reg[0] else min(unique_times), 
+                 time_reg[1] if time_reg[1] else max(unique_times)))
