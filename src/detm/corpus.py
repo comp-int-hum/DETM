@@ -60,10 +60,11 @@ class Corpus(list):
             time_field=None,
             min_word_count=1,
             max_word_proportion=1.0,
+            max_vocabulary_size=None
     ):
-        
         word_subdoc_count = {}
         subdoc_count = 0
+        lookup = {}        
         for doc in self:
             if time_field != None:
                 time = doc.get(time_field, None)
@@ -74,13 +75,14 @@ class Corpus(list):
 
             for subdoc_tokens in doc[content_field]:
                 for w in set(subdoc_tokens):
-                    word_subdoc_count[w] = word_subdoc_count.get(w, 0) + 1
+                    if w:
+                        word_subdoc_count[w] = word_subdoc_count.get(w, 0) + 1
                 subdoc_count += 1
 
         word_to_id = {}
-        for k, v in word_subdoc_count.items():
-            if v >= min_word_count and v / subdoc_count <= max_word_proportion:
-                word_to_id[k] = len(word_to_id)
+        for c, w in reversed(sorted([(i, v) for v, i in word_subdoc_count.items()])):
+            if c >= min_word_count and c / subdoc_count <= max_word_proportion and (max_vocabulary_size == None or len(word_to_id) < max_vocabulary_size):
+                word_to_id[w] = len(word_to_id)
 
         unique_times = set()
         unique_tokens = set()
@@ -88,6 +90,7 @@ class Corpus(list):
         times = []
         dropped_because_empty = 0
         dropped_because_timeless = 0
+
         for doc in self:
             time = None
             if time_field != None:

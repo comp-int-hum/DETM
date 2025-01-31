@@ -4,7 +4,7 @@ import random
 import torch
 import numpy
 from torch import autograd
-import wandb
+#import wandb
 
 
 logger = logging.getLogger("utils")
@@ -16,7 +16,7 @@ def train_model(
         model,
         optimizer,
         max_epochs,
-        clip=2.0,
+        clip=10.0,
         lr_factor=2.0,
         batch_size=32,
         device="cpu",
@@ -35,26 +35,36 @@ def train_model(
 
     train_times = [x for _, x in pairs[int(val_proportion*len(times)):]]
     val_times = [x for _, x in pairs[:int(val_proportion*len(times))]]
-    
+
+    logger.info("Saving initial model parameters")
     best_state = copy.deepcopy(model.state_dict())
+    best_optimizer_state = copy.deepcopy(optimizer.state_dict())
     best_val_ppl = float("inf")
     since_annealing = 0
     since_improvement = 0
     
     
     for epoch in range(1, max_epochs + 1):
-        model.train(True)
-        model.prepare_for_data(train_subdocs, train_times)
         logger.info("Starting epoch %d", epoch)
+        model.train(True)
+        logger.info("Preparing for data")
+        model.prepare_for_data(train_subdocs, train_times)
         acc_loss = 0
         acc_nll = 0
         acc_kl_theta_loss = 0
         acc_kl_eta_loss = 0
         acc_kl_alpha_loss = 0
         cnt = 0
+        word_count = 0
+
+        logger.info("Computing batches")
         indices = torch.randperm(len(train_subdocs))
         indices = torch.split(indices, batch_size)
+
+        
+        logger.info("Processing training and updating model")
         for idx, ind in enumerate(indices):
+
             optimizer.zero_grad()
             model.zero_grad()
             actual_batch_size = len(ind)
@@ -66,7 +76,8 @@ def train_model(
                 times_batch[i] = train_times[doc_id] #0 if idx > 0 else train_times[doc_id]
                 for k, v in subdoc.items():
                     data_batch[i, k] = v
-
+                    word_count += v
+                    
             # TODO find solution, preferra
             """if "cETM" in str(type(model)):
                 #sort by time
@@ -97,32 +108,33 @@ def train_model(
             acc_kl_alpha_loss += torch.sum(kl_alpha).item()
             cnt += data_batch.shape[0]
 
-            if idx % 100 == 0:
-                cur_loss = round(acc_loss / cnt, 2) 
-                cur_nll = round(acc_nll / cnt, 2) 
-                cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
-                cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
-                cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
-                lr = optimizer.param_groups[0]['lr']
-                if use_wandb:
-                    wandb.log({
-                        "step": (idx) + (epoch-1) * len(indices),
-                        "epoch": (epoch-1) + idx / len(indices),
-                        "train/loss": torch.sum(loss).item() / data_batch.shape[0],
-                        "train/nll": torch.sum(nll).item() / data_batch.shape[0],
-                        "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
-                        "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
-                        "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
-                    })
-        cur_loss = round(acc_loss / cnt, 2) 
-        cur_nll = round(acc_nll / cnt, 2) 
-        cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
-        cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
-        cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
+            # if idx % 100 == 0:
+            #     cur_loss = round(acc_loss / cnt, 2) 
+            #     cur_nll = round(acc_nll / cnt, 2) 
+            #     cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
+            #     cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
+            #     cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
+            #     lr = optimizer.param_groups[0]['lr']
+            #     if use_wandb:
+            #         wandb.log({
+            #             "step": (idx) + (epoch-1) * len(indices),
+            #             "epoch": (epoch-1) + idx / len(indices),
+            #             "train/loss": torch.sum(loss).item() / data_batch.shape[0],
+            #             "train/nll": torch.sum(nll).item() / data_batch.shape[0],
+            #             "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
+            #             "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
+            #             "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
+            #         })
+        #print(word_count)
+        cur_loss = acc_loss / word_count
+        cur_nll = acc_nll / word_count
+        cur_kl_theta = acc_kl_theta_loss / word_count
+        cur_kl_eta = acc_kl_eta_loss / word_count 
+        cur_kl_alpha = acc_kl_alpha_loss / word_count
         lr = optimizer.param_groups[0]['lr']
 
 
-        logger.info("Computing perplexity...")
+        logger.info("Processing validation")
         _, val_ppl = apply_model(
             model,
             val_subdocs,
@@ -131,7 +143,7 @@ def train_model(
             detect_anomalies=detect_anomalies
         )
         logger.info(
-            '{}: LR: {}, Train doc losses: mix_prior={:.3f}, mix={:.3f}, embs={:.3f}, recon={:.3f}, NELBO={:.3f} Val doc ppl: {:.3f}'.format(
+            '{}: LR: {}, Train loss per word: mix_prior={:.2f}, mix={:.2f}, embs={:.2f}, recon={:.2f}, NELBO={:.2f} Val ppl per word: {:.2f}'.format(
                 epoch,
                 lr,
                 cur_kl_eta,
@@ -142,15 +154,16 @@ def train_model(
                 val_ppl
             )
         )
-        if use_wandb:
-            wandb.log({
-                "val/ppl": val_ppl
-            })
+        #if use_wandb:
+        #    wandb.log({
+        #        "val/ppl": val_ppl
+        #    })
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
             best_val_ppl = val_ppl
             best_state = copy.deepcopy(model.state_dict())
+            best_optimizer_state = copy.deepcopy(optimizer.state_dict())
             since_improvement = 0
             logger.info("Copied.")
         else:
@@ -162,6 +175,7 @@ def train_model(
             since_annealing = 0
         elif numpy.isnan(val_ppl):
             logger.error("Perplexity was NaN: reducing learning rate and trying again...")
+            optimizer.load_state_dict(best_optimizer_state)
             model.load_state_dict(best_state)
             optimizer.param_groups[0]['lr'] /= lr_factor
         elif since_improvement >= 10:
@@ -181,13 +195,15 @@ def apply_model(
         use_wandb=False
 ):
     model.train(False)
+    logger.info("Preparing for data")
     model.prepare_for_data(subdocs, times)
 
     ppl = 0
     cnt = 0
     indices = torch.randperm(len(subdocs))
     indices = torch.split(indices, batch_size)
-
+    word_count = 0
+    
     for idx, ind in enumerate(indices):
         actual_batch_size = len(ind)
         data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
@@ -199,6 +215,7 @@ def apply_model(
             times_batch[i] = tm
             for k, v in subdoc.items():
                 data_batch[i, k] = v
+                word_count += v
         data_batch = torch.from_numpy(data_batch).float()
         times_batch = torch.from_numpy(times_batch)
         sums = data_batch.sum(1).unsqueeze(1)
@@ -210,7 +227,8 @@ def apply_model(
 
             ppl += torch.sum(nll).item()
             cnt += data_batch.shape[0]
-    return (), ppl / cnt
+
+    return (), ppl / word_count
 
 # from sklearn.manifold import TSNE
 # import torch 

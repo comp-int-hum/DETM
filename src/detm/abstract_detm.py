@@ -28,28 +28,46 @@ class AbstractDETM(torch.nn.Module, ABC):
         """
         pass
 
-    @abstractmethod
+    #@abstractmethod
     def evenly_spaced_times(self, step=1):
         pass
     
-    @abstractmethod
+    #@abstractmethod
     def topic_embeddings(self, document_times):
         """
         batch_size x num_topics x embedding_size
+
+          or
+
+        num_windows x num_topics x embedding_size
         """
         pass
 
     @abstractmethod
-    def document_topic_mixture_priors(self, document_times):
+    def topic_representations(self, document_times=None):
+        """
+        batch_size x num_topics x embedding_size
+        
+          or
+
+        num_windows x num_topics x embedding_size
+        """
+        pass
+    
+    @abstractmethod
+    def topic_mixture_priors(self, document_times=None):
         """
         batch_size x num_topics
+
+          or
+
+        num_windows x num_topics
         """
         return None
 
     @abstractmethod
     def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
         """
-        batch_size x num_topics
         """
         return None
     
@@ -60,6 +78,13 @@ class AbstractDETM(torch.nn.Module, ABC):
         return reconstruction_loss.sum() + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum()
     
     def topic_distributions(self, topic_embeddings=None):
+        """
+        batch_size x num_topics x vocabulary_size
+
+          or
+
+        num_windows x num_topics x vocabulary_size
+        """
         if topic_embeddings == None:
             time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
             topic_embeddings, _ = self.topic_embeddings(time_representations)
@@ -101,25 +126,24 @@ class AbstractDETM(torch.nn.Module, ABC):
             return mu
 
     def forward(self, document_word_counts, document_times):
+        normalized_document_word_counts = (document_word_counts / document_word_counts.sum(1).unsqueeze(1)).to(self.device)
         document_word_counts = document_word_counts.to(self.device)
-        document_times = document_times.to(self.device)
         document_time_representations = torch.tensor([self.represent_time(t) for t in document_times]).to(self.device)
-        normalized_document_word_counts = document_word_counts / document_word_counts.sum(1).unsqueeze(1).to(self.device)
-        topic_embeddings, topic_embeddings_kld = self.topic_embeddings(document_time_representations)
-        document_topic_mixture_priors, document_topic_mixture_priors_kld = self.document_topic_mixture_priors(document_time_representations)
+        topic_representations, topic_representations_kld = self.topic_representations()
+        topic_mixture_priors, topic_mixture_priors_kld = self.topic_mixture_priors() #document_time_representations)
         document_topic_mixtures, document_topic_mixtures_kld = self.document_topic_mixtures(
-            document_topic_mixture_priors,
+            topic_mixture_priors,
             normalized_document_word_counts,
             document_time_representations
         )
-        topic_distributions = self.topic_distributions(topic_embeddings)
+        topic_distributions = self.topic_distributions(topic_representations)
         reconstruction, reconstruction_loss = self.reconstruction(
             document_topic_mixtures,
-            topic_distributions,
+            topic_distributions[document_time_representations],
             document_word_counts
         )
-        nelbo = self.combine_losses(reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld)
-        return (nelbo, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld)
+        nelbo = self.combine_losses(reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
+        return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
     
     @property
     def vocab_size(self):
