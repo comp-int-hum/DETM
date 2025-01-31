@@ -27,32 +27,67 @@ class AbstractDETM(torch.nn.Module, ABC):
         in relation to, etc.
         """
         pass
+
+    #@abstractmethod
+    def evenly_spaced_times(self, step=1):
+        pass
     
-    @abstractmethod
+    #@abstractmethod
     def topic_embeddings(self, document_times):
         """
         batch_size x num_topics x embedding_size
+
+          or
+
+        num_windows x num_topics x embedding_size
         """
         pass
 
     @abstractmethod
-    def document_topic_mixture_priors(self, document_times):
+    def topic_representations(self, document_times=None):
+        """
+        batch_size x num_topics x embedding_size
+        
+          or
+
+        num_windows x num_topics x embedding_size
+        """
+        pass
+    
+    @abstractmethod
+    def topic_mixture_priors(self, document_times=None):
         """
         batch_size x num_topics
+
+          or
+
+        num_windows x num_topics
         """
         return None
 
     @abstractmethod
     def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
         """
-        batch_size x num_topics
         """
         return None
     
     def prepare_for_data(self, document_word_counts, document_times):
         pass
 
-    def topic_distributions(self, topic_embeddings):
+    def combine_losses(self, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld):
+        return reconstruction_loss.sum() + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum()
+    
+    def topic_distributions(self, topic_embeddings=None):
+        """
+        batch_size x num_topics x vocabulary_size
+
+          or
+
+        num_windows x num_topics x vocabulary_size
+        """
+        if topic_embeddings == None:
+            time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
+            topic_embeddings, _ = self.topic_embeddings(time_representations)
         tmp = topic_embeddings.view(topic_embeddings.size(0)*topic_embeddings.size(1), self.embeddings.shape[1])
         logit = torch.mm(tmp, self.embeddings.permute(1, 0)) 
         logit = logit.view(topic_embeddings.size(0), topic_embeddings.size(1), -1)
@@ -91,25 +126,24 @@ class AbstractDETM(torch.nn.Module, ABC):
             return mu
 
     def forward(self, document_word_counts, document_times):
+        normalized_document_word_counts = (document_word_counts / document_word_counts.sum(1).unsqueeze(1)).to(self.device)
         document_word_counts = document_word_counts.to(self.device)
-        document_times = document_times.to(self.device)
         document_time_representations = torch.tensor([self.represent_time(t) for t in document_times]).to(self.device)
-        normalized_document_word_counts = document_word_counts / document_word_counts.sum(1).unsqueeze(1).to(self.device)
-        topic_embeddings, topic_embeddings_kld = self.topic_embeddings(document_time_representations)
-        document_topic_mixture_priors, document_topic_mixture_priors_kld = self.document_topic_mixture_priors(document_time_representations)
+        topic_representations, topic_representations_kld = self.topic_representations()
+        topic_mixture_priors, topic_mixture_priors_kld = self.topic_mixture_priors() #document_time_representations)
         document_topic_mixtures, document_topic_mixtures_kld = self.document_topic_mixtures(
-            document_topic_mixture_priors,
+            topic_mixture_priors,
             normalized_document_word_counts,
             document_time_representations
         )
-        topic_distributions = self.topic_distributions(topic_embeddings)
+        topic_distributions = self.topic_distributions(topic_representations)
         reconstruction, reconstruction_loss = self.reconstruction(
             document_topic_mixtures,
-            topic_distributions,
+            topic_distributions[document_time_representations],
             document_word_counts
         )
-        nelbo = reconstruction_loss.sum() + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum()
-        return (nelbo, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld)
+        nelbo = self.combine_losses(reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
+        return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
     
     @property
     def vocab_size(self):
@@ -119,8 +153,20 @@ class AbstractDETM(torch.nn.Module, ABC):
     def embedding_size(self):
         return self.embeddings.shape[1]
 
+    def time_mixtures(self):
+        time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
+        logit, _ = self.document_topic_mixture_priors(time_representations)
+        dists = torch.nn.functional.softmax(logit, dim=-1)
+        return dists.detach().to("cpu")
+    
     def to(self, device):
         self.embeddings = self.embeddings.to(device)
         self.device = device
         return super().to(device)    
     
+    #def (self, time_representations, count=5):
+    #    topic_embeddings, _ = self.topic_embeddings(time_representations)
+    #    topic_distributions = self.topic_distributions(topic_embeddings)
+    #    
+    #    print(topic_distributions.shape)
+    #    return []

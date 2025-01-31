@@ -10,7 +10,7 @@ from .abstract_detm import AbstractDETM
 logger = logging.getLogger("xdetm")
 
 
-class xDETM(AbstractDETM):
+class xDETMm(AbstractDETM):
     def __init__(
             self,
             num_topics,
@@ -24,17 +24,9 @@ class xDETM(AbstractDETM):
             enc_drop=0.0,
             eta_dropout=0.0,
             eta_nlayers=3,
-            reweight_losses=False,
-            recompute_rnn_input=False,
-            mixture_and_topic_deltas=(0.005, 0.005),
-            full_rnn_input=True
+            delta=0.005,
     ):
-        super(xDETM, self).__init__(num_topics, word_list, embeddings)
-        self.full_rnn_input = full_rnn_input
-        self.mixture_delta = mixture_and_topic_deltas[0]
-        self.topic_delta = mixture_and_topic_deltas[1]
-        self.reweight_losses = reweight_losses
-        self.recompute_rnn_input = recompute_rnn_input
+        super(xDETMm, self).__init__(num_topics, word_list, embeddings)        
         self.max_time = max_time
         self.min_time = min_time
         self.window_size = window_size
@@ -44,7 +36,7 @@ class xDETM(AbstractDETM):
         self.enc_drop = enc_drop
         self.eta_nlayers = eta_nlayers
         self.t_drop = torch.nn.Dropout(enc_drop)
-        #self.delta = delta
+        self.delta = delta
 
         ## define the variational parameters for the topic embeddings over time (alpha) ... alpha is K x T x L
         self.mu_q_alpha = torch.nn.Parameter(torch.randn(self.num_topics, self.num_windows, self.embedding_size))
@@ -61,39 +53,33 @@ class xDETM(AbstractDETM):
         self.logsigma_q_theta = torch.nn.Linear(t_hidden_size, self.num_topics, bias=True)
 
         ## define variational distribution for \eta via amortizartion... eta is K x T
-        self.q_eta_map = torch.nn.Linear(self.vocab_size if self.full_rnn_input else self.embedding_size, eta_hidden_size)
+        self.q_eta_map = torch.nn.Linear(self.vocab_size, eta_hidden_size)
         self.q_eta = torch.nn.LSTM(eta_hidden_size, eta_hidden_size, eta_nlayers, dropout=eta_dropout)
         self.mu_q_eta = torch.nn.Linear(eta_hidden_size+self.num_topics, self.num_topics, bias=True)
         self.logsigma_q_eta = torch.nn.Linear(eta_hidden_size+self.num_topics, self.num_topics, bias=True)
         logger.info("%d windows, %d topics, %d words", self.num_windows, self.num_topics, self.vocab_size)
         
     def represent_time(self, time):
-        return min(int((time - self.min_time) / self.window_size), self.num_windows - 1)
+        return int((time - self.min_time) / self.window_size)
 
-    def evenly_spaced_times(self, step=1):
-        return torch.arange(0, self.num_windows, step) * self.window_size + self.min_time
-    
-    def topic_representations(self, document_times=None):
-        if document_times != None:
-            raise Exception("xDETM doesn't create per-document topic representations!")
-        representations = torch.zeros(self.num_windows, self.num_topics, self.embedding_size).to(self.device)
+    def topic_embeddings(self, document_times):
+        alphas = torch.zeros(self.num_windows, self.num_topics, self.embedding_size).to(self.device)
         kl_alpha = []
-        representations[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
+        alphas[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
         p_mu_0 = torch.zeros(self.num_topics, self.embedding_size).to(self.device)
         logsigma_p_0 = torch.zeros(self.num_topics, self.embedding_size).to(self.device)
         kl_0 = self.get_kl(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :], p_mu_0, logsigma_p_0)
         kl_alpha.append(kl_0)
         for t in range(1, self.num_windows):
-            representations[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
-            p_mu_t = representations[t-1]
-            logsigma_p_t = torch.log(self.topic_delta * torch.ones(self.num_topics, self.embedding_size).to(self.device))
+            alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
+            p_mu_t = alphas[t-1]
+            logsigma_p_t = torch.log(torch.exp(self.logsigma_q_alpha[:, t-1, :]) + self.delta * self.centroid_difference[t-1] * torch.ones(self.num_topics, self.embedding_size).to(self.device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
-        return representations, torch.stack(kl_alpha)
+        #print("kl_alpha", kl_alpha)
+        return alphas[document_times], torch.stack(kl_alpha)
 
-    def topic_mixture_priors(self, document_times=None):
-        if document_times != None:
-            raise Exception("xDETM doesn't create per-document topic-mixture priors!")
+    def document_topic_mixture_priors(self, document_times):
         inp = self.q_eta_map(self.rnn_input).unsqueeze(1)
         #hidden = self.init_hidden()
         weight = next(self.parameters())
@@ -124,18 +110,17 @@ class xDETM(AbstractDETM):
                 logsigma_t = self.logsigma_q_eta(inp_t)
                 etas[t] = self.reparameterize(mu_t, logsigma_t)
                 p_mu_t = etas[t-1]
-                logsigma_p_t = torch.log(self.mixture_delta * torch.ones(self.num_topics,).to(self.device))
+                logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics,).to(self.device))
                 kl_t = self.get_kl(mu_t, logsigma_t, p_mu_t, logsigma_p_t)
                 kl_eta.append(kl_t)
             else:
                 etas[t] = mu_t
                 kl_eta.append(torch.tensor([]).to(self.device))
-        return etas, torch.stack(kl_eta)
+        return etas[document_times], torch.stack(kl_eta)
     
-    def document_topic_mixtures(self, topic_mixture_priors, document_word_counts, document_times):
+    def document_topic_mixtures(self, document_topic_mixture_priors, document_word_counts, document_times):
         """Returns the topic proportions.
         """
-        document_topic_mixture_priors = topic_mixture_priors[document_times]
         inp = torch.cat([document_word_counts, document_topic_mixture_priors], dim=1)
         q_theta = self.q_theta(inp)
         if self.enc_drop > 0 and self.training:
@@ -145,27 +130,18 @@ class xDETM(AbstractDETM):
             return torch.nn.functional.softmax(mu_theta, dim=-1), torch.tensor([]).to(self.device)
         logsigma_theta = self.logsigma_q_theta(q_theta)
         z = self.reparameterize(mu_theta, logsigma_theta)
-        theta = torch.nn.functional.softmax(z, dim=-1)
+        theta = torch.nn.functional.softmax(z, dim=-1)                
         kl_theta = self.get_kl(mu_theta, logsigma_theta, document_topic_mixture_priors, torch.zeros(self.num_topics).to(self.device))
         return theta, kl_theta
 
-    def combine_losses(self, reconstruction_loss, topic_embeddings_kld, document_topic_mixture_priors_kld, document_topic_mixtures_kld):
-        coeff = self.num_docs / reconstruction_loss.shape[0] if self.reweight_losses else 1.0
-        return reconstruction_loss.sum() * coeff + topic_embeddings_kld.sum() + document_topic_mixture_priors_kld.sum() + document_topic_mixtures_kld.sum() * coeff
-        
-
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
-        if hasattr(self, "rnn_input") and not self.recompute_rnn_input:
-            logger.info("Model already has RNN input defined from training")
-            return
         self.num_docs = len(document_word_counts)
         document_times = [self.represent_time(t) for t in document_times]
         window_count = self.num_windows
-        rnn_input = torch.zeros(window_count, self.vocab_size if self.full_rnn_input else self.embedding_size).to(self.device)
         indices = torch.arange(0, len(document_word_counts), dtype=torch.int)
         indices = torch.split(indices, batch_size)
+        rnn_input = torch.zeros(window_count, self.vocab_size).to(self.device)
         cnt = torch.zeros(window_count, ).to(self.device)
-        
         for idx, ind in enumerate(indices):
             batch_size = len(ind)
             data_batch = numpy.zeros((batch_size, self.vocab_size))
@@ -181,23 +157,6 @@ class xDETM(AbstractDETM):
             for t in range(window_count):
                 tmp = (times_batch == t).nonzero()
                 docs = data_batch[tmp].squeeze().sum(0)
-                if self.full_rnn_input:
-                    rnn_input[t] += docs
-                else:
-                    val = self.embeddings.T * docs
-                    rnn_input[t, 0:self.embedding_size] += val.sum(1)
+                rnn_input[t] += docs
                 cnt[t] += len(tmp)
-        while torch.count_nonzero(cnt) < cnt.shape[0]:
-            for i in range(cnt.shape[0]):
-                if cnt[i] == 0:
-                    if i == 0:
-                        rnn_input[i] = rnn_input[i + 1]
-                        cnt[i] = cnt[i + 1]
-                    elif i == cnt.shape[0] - 1:
-                        rnn_input[i] = rnn_input[i - 1]
-                        cnt[i] = cnt[i - 1]
-                    else:
-                        rnn_input[i] = rnn_input[i - 1] + rnn_input[i + 1]
-                        cnt[i] = cnt[i - 1] + cnt[i + 1]
-        self.rnn_input = (rnn_input / cnt.unsqueeze(1))
-        
+        self.rnn_input = rnn_input / cnt.unsqueeze(1)
