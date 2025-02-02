@@ -5,6 +5,7 @@ from .DBDETM_reparemetrized import DBDETMr
 from .xdetm import xDETM
 from .xdetm_no_reparametrization import xDETMnr
 from .xdetm_matrix import xDETMm
+from .xdetm_coeff import xDETMCoeff
 from .corpus import Corpus
 from .abstract_detm import AbstractDETM
 from .embeddings import train_embeddings, load_embeddings, save_embeddings
