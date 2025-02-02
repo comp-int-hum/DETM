@@ -26,7 +26,7 @@ class xDETMCoeff(AbstractDETM):
             eta_nlayers=3,
             delta=0.005,
     ):
-        super(xDETM, self).__init__(num_topics, word_list, embeddings)        
+        super(xDETMCoeff, self).__init__(num_topics, word_list, embeddings)        
         self.max_time = max_time
         self.min_time = min_time
         self.window_size = window_size
