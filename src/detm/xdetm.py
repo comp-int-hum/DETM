@@ -200,4 +200,3 @@ class xDETM(AbstractDETM):
                         rnn_input[i] = rnn_input[i - 1] + rnn_input[i + 1]
                         cnt[i] = cnt[i - 1] + cnt[i + 1]
         self.rnn_input = (rnn_input / cnt.unsqueeze(1))
-        

@@ -2,6 +2,7 @@ import math
 import logging
 import re
 import numpy
+from tqdm import tqdm
 
 
 logger = logging.getLogger("corpus")
@@ -19,10 +20,11 @@ class Corpus(list):
     ):
         subdocs = []
         times = []
+        auxiliaries = []
         word_to_index = {w : i for i, w in enumerate(model.word_list)}
         dropped_because_empty = 0
         dropped_because_timeless = 0
-        for doc in self:
+        for doc in tqdm(self):
             if time_field != None:
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
@@ -30,18 +32,24 @@ class Corpus(list):
                 else:
                     dropped_because_timeless += 1
                     continue
+            time_field_sub = time_field if time_field else ''
 
             for subdoc_tokens in doc[content_field]:
                 subdoc = {}
+                auxiliary = {k : v for k, v in doc.items() if (k != content_field and k != time_field_sub)}
+                auxiliary.setdefault('vocab_used', set())
                 for t in subdoc_tokens:
                     if t in word_to_index:
                         subdoc[word_to_index[t]] = subdoc.get(word_to_index[t], 0) + 1
+                        auxiliary['vocab_used'].add(t)
                 if len(subdoc) > 0:
                     subdocs.append(subdoc)
                     times.append(time)
+                    auxiliaries.append(auxiliary)
                 else:
                     dropped_because_empty += 1
-        return (subdocs, times)
+            
+        return (subdocs, times, auxiliaries)
 
     def get_tokenized_subdocs(
             self,
@@ -58,7 +66,7 @@ class Corpus(list):
             self,
             content_field,
             time_field=None,
-            time_reg=None,
+            time_reg=(None, None),
             min_word_count=1,
             max_word_proportion=1.0,
             max_vocabulary_size=None

@@ -5,27 +5,41 @@ import torch
 import numpy
 from torch import autograd
 from collections import Counter
-#import wandb
+from tqdm import tqdm
+from typing import List, Dict
 
-
+# logging.basicConfig(filename='app.log', level=logging.INFO)
 logger = logging.getLogger("utils")
 
+def _yield_data(subdocs, times, vocab_size, batch_size=64):
+    word_count = 0
+    indices = torch.randperm(len(subdocs))
+    indices = torch.split(indices, batch_size)
+
+    for ind in tqdm(indices):
+        actual_batch_size = len(ind)
+        data_batch = numpy.zeros((actual_batch_size, vocab_size))
+        times_batch = numpy.zeros((actual_batch_size, ))
+
+        for i, doc_id in enumerate(ind):
+            subdoc = subdocs[doc_id]
+            times_batch[i] = times[doc_id]
+            for k, v in subdoc.items():
+                data_batch[i, k] = v
+                word_count += v
+        data_batch = torch.from_numpy(data_batch).float()
+        times_batch = torch.from_numpy(times_batch)
+
+        yield times_batch, data_batch, word_count, ind
     
 def train_model(
-        subdocs,
-        times,
-        model,
-        optimizer,
-        max_epochs,
-        clip=10.0,
-        lr_factor=2.0,
-        batch_size=32,
-        device="cpu",
-        val_proportion=0.2,
-        detect_anomalies=False,
-        use_wandb=False
-):
-    #times = [model.represent_time(t) for t in times]
+        subdocs, times,
+        model, optimizer,
+        max_epochs, clip=10.0,
+        lr_factor=2.0, batch_size=32,
+        device="cpu", val_proportion=0.2,
+        detect_anomalies=False, use_wandb=False):
+
     model = model.to(device)
     
     pairs = list(zip(subdocs, times))
@@ -38,7 +52,8 @@ def train_model(
     val_times = [x for _, x in pairs[:int(val_proportion*len(times))]]
 
     train_time_wins = [int((time_instance - model.min_time) / model.window_size) for time_instance in train_times]
-    logger.info(Counter(train_time_wins))
+    counter_info = dict(sorted(Counter(train_time_wins).items()))
+    logger.info(f"information of instances present per set: {counter_info}")
     
     logger.info("Saving initial model parameters")
     best_state = copy.deepcopy(model.state_dict())
@@ -53,7 +68,6 @@ def train_model(
         model.train(True)
         logger.info("Preparing for data")
         model.prepare_for_data(train_subdocs, train_times)
-        return None
         
         acc_loss = 0
         acc_nll = 0
@@ -64,74 +78,35 @@ def train_model(
         word_count = 0
 
         logger.info("Computing batches")
-        indices = torch.randperm(len(train_subdocs))
-        indices = torch.split(indices, batch_size)
+        train_generator = _yield_data(train_subdocs, train_times, model.vocab_size,
+                                      batch_size)
 
-        
         logger.info("Processing training and updating model")
-        for idx, ind in enumerate(indices):
+        while True:
+            try:
+                times_batch, data_batch, word_subcount, _ = next(train_generator)
+                word_count += word_subcount
+                optimizer.zero_grad()
+                model.zero_grad()
 
-            optimizer.zero_grad()
-            model.zero_grad()
-            actual_batch_size = len(ind)
-            data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
-            times_batch = numpy.zeros((actual_batch_size, ))
+                with autograd.set_detect_anomaly(detect_anomalies):
 
-            for i, doc_id in enumerate(ind):
-                subdoc = train_subdocs[doc_id]
-                times_batch[i] = train_times[doc_id] #0 if idx > 0 else train_times[doc_id]
-                for k, v in subdoc.items():
-                    data_batch[i, k] = v
-                    word_count += v
-                    
-            # TODO find solution, preferra
-            """if "cETM" in str(type(model)):
-                #sort by time
-                sorted_indices = numpy.argsort(times_batch)
-                data_batch = data_batch[sorted_indices]
-                times_batch = times_batch[sorted_indices]"""
+                    loss, nll, kl_alpha, kl_eta, kl_theta = model(data_batch, times_batch)
+                    loss.backward()
+                    if clip > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                    optimizer.step()
+
+                acc_loss += torch.sum(loss).item()
+                acc_nll += torch.sum(nll).item()
+                acc_kl_theta_loss += torch.sum(kl_theta).item()
+                acc_kl_eta_loss += torch.sum(kl_eta).item()
+                acc_kl_alpha_loss += torch.sum(kl_alpha).item()
+                cnt += data_batch.shape[0]
             
+            except StopIteration:
+                break
 
-            data_batch = torch.from_numpy(data_batch).float()
-            times_batch = torch.from_numpy(times_batch)
-            sums = data_batch.sum(1).unsqueeze(1)
-            normalized_data_batch = data_batch / sums
-            with autograd.set_detect_anomaly(detect_anomalies):
-
-                loss, nll, kl_alpha, kl_eta, kl_theta = model(
-                    data_batch,
-                    times_batch,
-                )
-                loss.backward()
-                if clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
-                optimizer.step()
-
-            acc_loss += torch.sum(loss).item()
-            acc_nll += torch.sum(nll).item()
-            acc_kl_theta_loss += torch.sum(kl_theta).item()
-            acc_kl_eta_loss += torch.sum(kl_eta).item()
-            acc_kl_alpha_loss += torch.sum(kl_alpha).item()
-            cnt += data_batch.shape[0]
-
-            # if idx % 100 == 0:
-            #     cur_loss = round(acc_loss / cnt, 2) 
-            #     cur_nll = round(acc_nll / cnt, 2) 
-            #     cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
-            #     cur_kl_eta = round(acc_kl_eta_loss / cnt, 2) 
-            #     cur_kl_alpha = round(acc_kl_alpha_loss / cnt, 2) 
-            #     lr = optimizer.param_groups[0]['lr']
-            #     if use_wandb:
-            #         wandb.log({
-            #             "step": (idx) + (epoch-1) * len(indices),
-            #             "epoch": (epoch-1) + idx / len(indices),
-            #             "train/loss": torch.sum(loss).item() / data_batch.shape[0],
-            #             "train/nll": torch.sum(nll).item() / data_batch.shape[0],
-            #             "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
-            #             "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
-            #             "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
-            #         })
-        #print(word_count)
         cur_loss = acc_loss / word_count
         cur_nll = acc_nll / word_count
         cur_kl_theta = acc_kl_theta_loss / word_count
@@ -160,10 +135,6 @@ def train_model(
                 val_ppl
             )
         )
-        #if use_wandb:
-        #    wandb.log({
-        #        "val/ppl": val_ppl
-        #    })
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
@@ -190,15 +161,10 @@ def train_model(
     return best_state
 
 
-
 def apply_model(
-        model,
-        subdocs,
-        times,
-        batch_size=32,
-        device="cpu",
-        detect_anomalies=False,
-        use_wandb=False
+        model, subdocs,
+        times, batch_size=32, device="cpu", 
+        detect_anomalies=False, use_wandb=False
 ):
     model.train(False)
     logger.info("Preparing for data")
@@ -206,186 +172,105 @@ def apply_model(
 
     ppl = 0
     cnt = 0
-    indices = torch.randperm(len(subdocs))
-    indices = torch.split(indices, batch_size)
     word_count = 0
     
-    for idx, ind in enumerate(indices):
-        actual_batch_size = len(ind)
-        data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
-        times_batch = numpy.zeros((actual_batch_size, ))
+    appl_generator = _yield_data(subdocs, times, model.vocab_size, batch_size)
+    while True:
+        try:
+            times_batch, data_batch, word_subcount, _ = next(appl_generator)
+            word_count += word_subcount
+            with autograd.set_detect_anomaly(detect_anomalies):
+                _, nll, _, _, _ = model(
+                    data_batch,
+                    times_batch,
+                )
 
-        for i, subdoc_id in enumerate(ind):
-            subdoc = subdocs[subdoc_id]
-            tm = times[subdoc_id]
-            times_batch[i] = tm
-            for k, v in subdoc.items():
-                data_batch[i, k] = v
-                word_count += v
-        data_batch = torch.from_numpy(data_batch).float()
-        times_batch = torch.from_numpy(times_batch)
-        sums = data_batch.sum(1).unsqueeze(1)
-        with autograd.set_detect_anomaly(detect_anomalies):
-            loss, nll, kl_alpha, kl_eta, kl_theta = model(
-                data_batch,
-                times_batch,
-            )
+                ppl += torch.sum(nll).item()
+                cnt += data_batch.shape[0]
+        except StopIteration:
+            break
 
             ppl += torch.sum(nll).item()
             cnt += data_batch.shape[0]
 
     return (), ppl / word_count
 
-# from sklearn.manifold import TSNE
-# import torch 
-# import numpy as np
-# import bokeh.plotting as bp
-# from bokeh.plotting import save
-# from bokeh.models import HoverTool
-# import matplotlib.pyplot as plt 
-# import matplotlib 
+class AuthorData:
 
-# tiny = 1e-6
+    def __init__(self, name : str, num_topics: int,
+                works: List[str] = [], vocabs: List[str] = []):
+        self.name = name
+        self.work2idx = {work : idx for idx, work in enumerate(works)}
+        # here ideally vocabs is a list of word that the author has used based on an overall vocab_list
+        self.vocab2idx = {vocab: idx for idx, vocab in enumerate(vocabs)}
+        self.annotate_by_vocab = numpy.zeros((len(vocabs), len(works), num_topics))
+        self.annotate_by_work =  numpy.zeros((len(works), num_topics))
+        
+    def annotate_subdocs(self, work, document_topic_mixture, per_vocab_topic_class):
+        work_idx = self.work2idx[work]
+        self.annotate_by_work[work_idx] += document_topic_mixture
 
-# def _reparameterize(mu, logvar, num_samples):
-#     """Applies the reparameterization trick to return samples from a given q"""
-#     std = torch.exp(0.5 * logvar) 
-#     bsz, zdim = logvar.size()
-#     eps = torch.randn(num_samples, bsz, zdim).to(mu.device)
-#     mu = mu.unsqueeze(0)
-#     std = std.unsqueeze(0)
-#     res = eps.mul_(std).add_(mu)
-#     return res
+        for vocab, topic_class in per_vocab_topic_class.items():
+            self.annotate_by_vocab[self.vocab2idx[vocab], work_idx, topic_class] += 1
 
-# def get_document_frequency(data, wi, wj=None):
-#     if wj is None:
-#         D_wi = 0
-#         for l in range(len(data)):
-#             doc = data[l].squeeze(0)
-#             if len(doc) == 1: 
-#                 continue
-#                 #doc = [doc.squeeze()]
-#             else:
-#                 doc = doc.squeeze()
-#             if wi in doc:
-#                 D_wi += 1
-#         return D_wi
-#     D_wj = 0
-#     D_wi_wj = 0
-#     for l in range(len(data)):
-#         doc = data[l].squeeze(0)
-#         if len(doc) == 1: 
-#             doc = [doc.squeeze()]
-#         else:
-#             doc = doc.squeeze()
-#         if wj in doc:
-#             D_wj += 1
-#             if wi in doc:
-#                 D_wi_wj += 1
-#     return D_wj, D_wi_wj 
+def annotate_data(model, subdocs, times, auxiliaries,
+                author_field, title_field,
+                vocab_field="vocab_used",
+                batch_size=32, device="cpu", 
+                detect_anomalies=False, use_wandb=False):
 
-# def get_topic_coherence(beta, data, vocab):
-#     D = len(data) ## number of docs...data is list of documents
-#     print('D: ', D)
-#     TC = []
-#     num_topics = len(beta)
-#     for k in range(num_topics):
-#         print('k: {}/{}'.format(k, num_topics))
-#         top_10 = list(beta[k].argsort()[-11:][::-1])
-#         top_words = [vocab[a] for a in top_10]
-#         TC_k = 0
-#         counter = 0
-#         for i, word in enumerate(top_10):
-#             # get D(w_i)
-#             D_wi = get_document_frequency(data, word)
-#             j = i + 1
-#             tmp = 0
-#             while j < len(top_10) and j > i:
-#                 # get D(w_j) and D(w_i, w_j)
-#                 D_wj, D_wi_wj = get_document_frequency(data, word, top_10[j])
-#                 # get f(w_i, w_j)
-#                 if D_wi_wj == 0:
-#                     f_wi_wj = -1
-#                 else:
-#                     f_wi_wj = -1 + ( np.log(D_wi) + np.log(D_wj)  - 2.0 * np.log(D) ) / ( np.log(D_wi_wj) - np.log(D) )
-#                 # update tmp: 
-#                 tmp += f_wi_wj
-#                 j += 1
-#                 counter += 1
-#             # update TC_k
-#             TC_k += tmp 
-#         TC.append(TC_k)
-#     print('counter: ', counter)
-#     print('num topics: ', len(TC))
-#     #TC = np.mean(TC) / counter
-#     print('Topic Coherence is: {}'.format(TC))
-#     return TC, counter
+    num_topics, vocab_list = model.num_topics, model.word_list
 
-# def log_gaussian(z, mu=None, logvar=None):
-#     sz = z.size()
-#     d = z.size(2)
-#     bsz = z.size(1)
-#     if mu is None or logvar is None:
-#         mu = torch.zeros(bsz, d).to(z.device)
-#         logvar = torch.zeros(bsz, d).to(z.device)
-#     mu = mu.unsqueeze(0)
-#     logvar = logvar.unsqueeze(0)
-#     var = logvar.exp()
-#     log_density = ((z - mu)**2 / (var+tiny)).sum(2) # b
-#     log_det = logvar.sum(2) # b
-#     log_density = log_density + log_det + d*np.log(2*np.pi)
-#     return -0.5*log_density
-
-# def logsumexp(x, dim=0):
-#     d = torch.max(x, dim)[0]   
-#     if x.dim() == 1:
-#         return torch.log(torch.exp(x - d).sum(dim)) + d
-#     else:
-#         return torch.log(torch.exp(x - d.unsqueeze(dim).expand_as(x)).sum(dim) + tiny) + d
-
-# def flatten_docs(docs): #to get words and doc_indices
-#     words = [x for y in docs for x in y]
-#     doc_indices = [[j for _ in doc] for j, doc in enumerate(docs)]
-#     doc_indices = [x for y in doc_indices for x in y]
-#     return words, doc_indices
+    auth2work_vocab_tuple = {}
+    for auxiliary, time in zip(auxiliaries, times):
+        author_name = auxiliary[author_field]
+        title_name_w_year = auxiliary[title_field] + f" [-] " + str(int(time))
+        title_set, vocab_set = auth2work_vocab_tuple.get(author_name, (set(), set()))
+        title_set.add(title_name_w_year)
+        vocab_set.update(auxiliary[vocab_field])
+        auth2work_vocab_tuple[author_name] = (title_set, vocab_set)
     
-# def onehot(data, min_length):
-#     return list(np.bincount(data, minlength=min_length))
+    auth2annote = {}
+    for auth_name, (title_set, vocab_set) in auth2work_vocab_tuple.items():
+        auth2annote[auth_name] = AuthorData(auth_name, num_topics, works=list(title_set), vocabs=list(vocab_set))
+    
+    del auth2work_vocab_tuple
 
-# def nearest_neighbors(word, embeddings, vocab, num_words):
-#     vectors = embeddings.cpu().numpy() 
-#     index = vocab.index(word)
-#     query = embeddings[index].cpu().numpy() 
-#     ranks = vectors.dot(query).squeeze()
-#     denom = query.T.dot(query).squeeze()
-#     denom = denom * np.sum(vectors**2, 1)
-#     denom = np.sqrt(denom)
-#     ranks = ranks / denom
-#     mostSimilar = []
-#     [mostSimilar.append(idx) for idx in ranks.argsort()[::-1]]
-#     nearest_neighbors = mostSimilar[:num_words]
-#     nearest_neighbors = [vocab[comp] for comp in nearest_neighbors]
-#     return nearest_neighbors
+    model.train(False)
+    logger.info("Preparing for data")
+    model.prepare_for_data(subdocs, times)
+    
+    appl_generator = _yield_data(subdocs, times, model.vocab_size, batch_size)
 
-# def visualize(docs, _lda_keys, topics, theta):
-#     tsne_model = TSNE(n_components=2, verbose=1, random_state=0, angle=.99, init='pca')
-#     # project to 2D
-#     tsne_lda = tsne_model.fit_transform(theta)
-#     colormap = []
-#     for name, hex in matplotlib.colors.cnames.items():
-#         colormap.append(hex)
-
-#     colormap = colormap[:len(theta[0, :])]
-#     colormap = np.array(colormap)
-
-#     title = '20 newsgroups TE embedding V viz'
-#     num_example = len(docs)
-
-#     plot_lda = bp.figure(plot_width=1400, plot_height=1100,
-#                      title=title,
-#                      tools="pan,wheel_zoom,box_zoom,reset,hover,previewsave",
-#                      x_axis_type=None, y_axis_type=None, min_border=1)
-
-#     plt.scatter(x=tsne_lda[:, 0], y=tsne_lda[:, 1],
-#                  color=colormap[_lda_keys][:num_example])
-#     plt.show()
+    while True:
+        try:         
+            times_batch, data_batch, _, inds = next(appl_generator)
+            with autograd.set_detect_anomaly(detect_anomalies):
+                document_topic_mixtures, vocab_topic_mixtures = model(
+                    data_batch, times_batch, annotate=True)
+                document_topic_mixtures = document_topic_mixtures.cpu().detach().numpy()
+                vocab_topic_mixtures = vocab_topic_mixtures.cpu().detach().numpy()
+                
+                for ind, data_ins, document_topic_mixture, vocab_topic_mixture in zip(inds, data_batch, 
+                                                            document_topic_mixtures, vocab_topic_mixtures):
+                    vocab_topic = vocab_topic_mixture.argmax(0)
+                    token_instances = (torch.nonzero(data_ins, as_tuple=True)[0]).cpu().detach().numpy()
+                    per_vocab_topic_class = {vocab_list[tok_id] : vocab_topic[tok_id] for tok_id in token_instances}
+                    auxiliary, time = auxiliaries[ind], times[ind]
+                    author_name, title = auxiliary[author_field], auxiliary[title_field] + " [-] " + str(int(time))
+                    auth2annote[author_name].annotate_subdocs(title, document_topic_mixture, per_vocab_topic_class)
+                    
+        except StopIteration:
+            break
+    del appl_generator, model, subdocs, times, auxiliaries
+    logger.info(f"completing annotation, organizing data to be returned: ")
+    auth_matrix = [{
+        "auth_name": auth_name,
+        "work2idx": auth_data.work2idx,
+        "vocab2idx": auth_data.vocab2idx,
+        "annotate_by_vocab": auth_data.annotate_by_vocab.tolist(),
+        "annotate_by_work": auth_data.annotate_by_work.tolist()
+    } for auth_name, auth_data in auth2annote.items()]
+    del auth2annote
+    logger.info("completes creating matrix")
+    return auth_matrix

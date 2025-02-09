@@ -125,7 +125,7 @@ class AbstractDETM(torch.nn.Module, ABC):
         else:
             return mu
 
-    def forward(self, document_word_counts, document_times):
+    def forward(self, document_word_counts, document_times, annotate=False):
         normalized_document_word_counts = (document_word_counts / document_word_counts.sum(1).unsqueeze(1)).to(self.device)
         document_word_counts = document_word_counts.to(self.device)
         document_time_representations = torch.tensor([self.represent_time(t) for t in document_times]).to(self.device)
@@ -142,8 +142,13 @@ class AbstractDETM(torch.nn.Module, ABC):
             topic_distributions[document_time_representations],
             document_word_counts
         )
-        nelbo = self.combine_losses(reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
-        return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
+        nelbo = self.combine_losses(reconstruction_loss, topic_representations_kld, 
+                    topic_mixture_priors_kld, document_topic_mixtures_kld)
+        return ((document_topic_mixtures, 
+                document_topic_mixtures.unsqueeze(2) * topic_distributions[document_time_representations])
+                if annotate else 
+                (nelbo, reconstruction_loss, topic_representations_kld, 
+                topic_mixture_priors_kld, document_topic_mixtures_kld))
     
     @property
     def vocab_size(self):
