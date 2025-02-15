@@ -4,6 +4,7 @@ import random
 import torch
 import numpy
 from torch import autograd
+import wandb
 
 
 logger = logging.getLogger("utils")
