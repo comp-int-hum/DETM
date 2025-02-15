@@ -20,7 +20,8 @@ def train_model(
         batch_size=32,
         device="cpu",
         val_proportion=0.2,
-        detect_anomalies=False
+        detect_anomalies=False,
+        use_wandb=False,
 ):
     #times = [model.represent_time(t) for t in times]
     model = model.to(device)
@@ -85,6 +86,18 @@ def train_model(
             acc_kl_alpha_loss += torch.sum(kl_alpha).item()
             cnt += data_batch.shape[0]
 
+            if idx % 100 == 0:
+                if use_wandb:
+                    wandb.log({
+                        "step": (idx) + (epoch-1) * len(indices),
+                        "epoch": (epoch-1) + idx / len(indices),
+                        "train/loss": torch.sum(loss).item() / data_batch.shape[0],
+                        "train/nll": torch.sum(nll).item() / data_batch.shape[0],
+                        "train/kl_theta": torch.sum(kl_theta).item() / data_batch.shape[0],
+                        "train/kl_eta": torch.sum(kl_eta).item() / data_batch.shape[0],
+                        "train/kl_alpha": torch.sum(kl_alpha).item() / data_batch.shape[0]
+                    })
+
         cur_loss = round(acc_loss / cnt, 2) 
         cur_nll = round(acc_nll / cnt, 2) 
         cur_kl_theta = round(acc_kl_theta_loss / cnt, 2) 
@@ -113,6 +126,10 @@ def train_model(
                 val_ppl
             )
         )
+        if use_wandb:
+            wandb.log({
+                "val/ppl": val_ppl
+            })
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
