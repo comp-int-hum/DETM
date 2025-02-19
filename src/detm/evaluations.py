@@ -8,9 +8,122 @@ from itertools import combinations
 from .word_embeddings_rbo import word_embeddings_rbo
 from gensim.corpora.dictionary import Dictionary
 from gensim.parsing.preprocessing import preprocess_string
+import torch
 
 
 
+def get_document_frequency(data, wi, wj=None):
+    if wj is None:
+        D_wi = 0
+        for l in range(len(data)):
+            doc = data[l].squeeze(0)
+            if len(doc) == 1: 
+                continue
+                #doc = [doc.squeeze()]
+            else:
+                doc = doc.squeeze()
+            if wi in doc:
+                D_wi += 1
+        return D_wi
+    D_wj = 0
+    D_wi_wj = 0
+    for l in range(len(data)):
+        doc = data[l].squeeze(0)
+        if len(doc) == 1: 
+            doc = [doc.squeeze()]
+        else:
+            doc = doc.squeeze()
+        if wj in doc:
+            D_wj += 1
+            if wi in doc:
+                D_wi_wj += 1
+    return D_wj, D_wi_wj 
+
+def get_topic_coherence(beta, data):
+    D = len(data) ## number of docs...data is list of documents
+    print('D: ', D)
+    TC = []
+    num_topics = len(beta)
+    for k in range(num_topics):
+        print('k: {}/{}'.format(k, num_topics))
+        top_10 = list(beta[k].argsort()[-11:][::-1])
+        #top_words = [vocab[a] for a in top_10]
+        TC_k = 0
+        counter = 0
+        for i, word in enumerate(top_10):
+            # get D(w_i)
+            D_wi = get_document_frequency(data, word)
+            j = i + 1
+            tmp = 0
+            while j < len(top_10) and j > i:
+                # get D(w_j) and D(w_i, w_j)
+                D_wj, D_wi_wj = get_document_frequency(data, word, top_10[j])
+                # get f(w_i, w_j)
+                if D_wi_wj == 0:
+                    f_wi_wj = -1
+                else:
+                    f_wi_wj = -1 + ( np.log(D_wi) + np.log(D_wj)  - 2.0 * np.log(D) ) / ( np.log(D_wi_wj) - np.log(D) )
+                # update tmp: 
+                tmp += f_wi_wj
+                j += 1
+                counter += 1
+            # update TC_k
+            TC_k += tmp 
+        TC.append(TC_k)
+    print('counter: ', counter)
+    print('num topics: ', len(TC))
+    #TC = np.mean(TC) / counter
+    print('Topic Coherence is: {}'.format(TC))
+    return TC, counter
+
+def _diversity_helper(beta, num_tops, model):
+    list_w = np.zeros((model.num_topics, num_tops))
+    for k in range(model.num_topics):
+        gamma = beta[k, :]
+        top_words = gamma.cpu().numpy().argsort()[-num_tops:][::-1]
+        list_w[k, :] = top_words
+    list_w = np.reshape(list_w, (-1))
+    list_w = list(list_w)
+    n_unique = len(np.unique(list_w))
+    diversity = n_unique / (model.num_topics * num_tops)
+    return diversity
+
+def original_detm_evaluation(model, dataset):
+    """Returns topic coherence and topic diversity.
+    """
+    model.eval()
+    with torch.no_grad():
+        beta = model.topic_distributions()
+        print('beta: ', beta.size())
+
+        print('\n')
+        print('#'*100)
+        print('Get topic diversity...')
+        num_tops = 25
+        TD_all = np.zeros((model.num_windows,))
+        for tt in range(model.num_windows):
+            TD_all[tt] = _diversity_helper(beta[:, tt, :], num_tops, model)
+        TD = np.mean(TD_all)
+        print('Topic Diversity is: {}'.format(TD))
+
+        print('\n')
+        print('Get topic coherence...')
+        #print('train_tokens: ', train_tokens[0])
+        TC_all = []
+        cnt_all = []
+        for tt in range(model.num_windows):
+            tc, cnt = get_topic_coherence(beta[:, tt, :].cpu().numpy(), dataset)
+            TC_all.append(tc)
+            cnt_all.append(cnt)
+        print('TC_all: ', TC_all)
+        TC_all = torch.tensor(TC_all)
+        print('TC_all: ', TC_all.size())
+        print('\n')
+        print('Get topic quality...')
+        #quality = tc * diversity
+        quality = None
+        print('Topic Quality is: {}'.format(quality))
+        print('#'*100)
 
 
 def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **args):
