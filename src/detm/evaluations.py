@@ -2,10 +2,10 @@ from gensim.models import CoherenceModel
 import gensim.downloader as api
 import numpy as np
 import numpy as np
-from src.detm.rbo import rbo
+from .rbo import rbo
 from scipy.spatial import distance
 from itertools import combinations
-from src.detm.word_embeddings_rbo import word_embeddings_rbo
+from .word_embeddings_rbo import word_embeddings_rbo
 from gensim.corpora.dictionary import Dictionary
 from gensim.parsing.preprocessing import preprocess_string
 
@@ -35,6 +35,8 @@ def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **arg
         ]
     
     dictionary = Dictionary(text)
+
+    dictionary.add_documents([model.word_list])
     
     topics = model.get_topic_words(topn)
     num_windows = len(topics)
@@ -42,10 +44,10 @@ def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **arg
     for window in range(num_windows):
         try:
             coherence_model = CoherenceModel(topics=topics[window], texts=text, coherence=coherence_measure, topn=topn, dictionary=dictionary, **args)
-            coherences[window] = coherence_model.get_coherence()
+            coherences[window] = coherence_model.get_coherence().item()
         except:
             raise Exception(f'Error in coherence calculation in window {window}')
-    return (np.mean(list(coherences.values())), coherences)
+    return (np.mean(list(coherences.values())).item(), coherences)
 
 def evaluate_topic_diversity(model, divergence_measure, topn=10, **args):
     """
@@ -86,7 +88,7 @@ def evaluate_topic_diversity(model, divergence_measure, topn=10, **args):
             diversities[window] = centroid_distance(topic_words, embedding, topk=topn)
         else:
             raise Exception('Divergence measure not recognized')
-    return (np.mean(list(diversities.values())), diversities)
+    return (np.mean(list(diversities.values())).item(), diversities)
 
 
 
