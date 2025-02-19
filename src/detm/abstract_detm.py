@@ -87,12 +87,34 @@ class AbstractDETM(torch.nn.Module, ABC):
         """
         if topic_embeddings == None:
             time_representations = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
-            topic_embeddings, _ = self.topic_embeddings(time_representations)
+            topic_embeddings, _ = self.topic_representations(time_representations)
         tmp = topic_embeddings.view(topic_embeddings.size(0)*topic_embeddings.size(1), self.embeddings.shape[1])
         logit = torch.mm(tmp, self.embeddings.permute(1, 0)) 
         logit = logit.view(topic_embeddings.size(0), topic_embeddings.size(1), -1)
         dists = torch.nn.functional.softmax(logit, dim=-1)
         return dists
+    
+    def get_topic_words(self, topk=10, topic_embeddings=None):
+        training_state = self.training
+
+        self.training = False
+        topic_distributions = self.topic_distributions(topic_embeddings)
+        self.training = training_state
+        
+        num_windows, num_topics, _ = topic_distributions.shape
+
+        resulting_topics = []
+        for window_index in range(num_windows):
+            current_window = []
+            for topic_index in range(num_topics):
+                topic_distribution = topic_distributions[window_index, topic_index]
+                topk_indices = torch.argsort(topic_distribution, descending=True)[:topk]
+                topk_words = [self.word_list[i] for i in topk_indices]
+                current_window.append(topk_words)
+            resulting_topics.append(current_window)
+        
+        return resulting_topics
+
     
     def reconstruction(self, document_topic_mixtures, topic_distributions, document_word_counts):
         document_topic_mixtures = document_topic_mixtures.unsqueeze(1)

@@ -75,7 +75,8 @@ class xDETM(AbstractDETM):
     
     def topic_representations(self, document_times=None):
         if document_times != None:
-            raise Exception("xDETM doesn't create per-document topic representations!")
+            #raise Exception("xDETM doesn't create per-document topic representations!")
+            logger.warning("xDETM doesn't create per-document topic representations!")
         representations = torch.zeros(self.num_windows, self.num_topics, self.embedding_size).to(self.device)
         kl_alpha = []
         representations[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
