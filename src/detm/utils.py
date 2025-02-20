@@ -153,9 +153,12 @@ def train_model(
             if use_wandb:
                 wandb_dictionary = {}
                 for i, (diversity, coherence, quality) in enumerate(zip(topic_diversities, topic_coherences, topic_qualities)):
-                    wandb_dictionary[f"window_{i}/diversity"] = diversity
-                    wandb_dictionary[f"window_{i}/coherence"] = coherence
-                    wandb_dictionary[f"window_{i}/quality"] = quality
+                    wandb_dictionary[f"window_{i:02d}/diversity"] = diversity
+                    wandb_dictionary[f"window_{i:02d}/coherence"] = coherence
+                    wandb_dictionary[f"window_{i:02d}/quality"] = quality
+                wandb_dictionary["val/diversity"] = numpy.mean(topic_diversities)
+                wandb_dictionary["val/coherence"] = numpy.mean(topic_coherences)
+                wandb_dictionary["val/quality"] = numpy.mean(topic_qualities)
                 #wandb_dictionary["epoch"] = epoch
                 wandb.log(
                     wandb_dictionary
