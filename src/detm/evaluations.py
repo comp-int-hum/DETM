@@ -109,7 +109,7 @@ def original_detm_evaluation(model, dataset):
             cnt_all.append(cnt)
         print('TC_all: ', TC_all)
         TC_all = TC_all
-        print('TC_all: ', torch.tensor(TC_all.size()))
+        print('TC_all: ', torch.tensor(TC_all).size())
         print('\n')
         print('Get topic quality...')
         quality = np.mean(TC_all) / TD
