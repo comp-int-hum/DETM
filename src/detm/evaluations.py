@@ -118,7 +118,7 @@ def original_detm_evaluation(model, dataset):
     return TD, TC_all, quality
 
 
-def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **args):
+def evaluate_coherence(model=None, topics=None, coherence_measure="c_v", topn=10, text=None, dictionary=None, **args):
     """
     Evaluate the coherence of the model
 
@@ -132,26 +132,33 @@ def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **arg
     -------
     coherence : float, dict mean coherence, coherence per window { window_index : coherence }
     """
+    assert coherence_measure in ['c_v', 'c_uci', 'c_npmi', 'u_mass'], 'coherence measure not recognized'
+    assert model is not None or topics is not None, 'model or topics must be provided'
+
     if text is None:
         corpus = api.load('20-newsgroups')
         text = [
             preprocess_string(text['data'])
             for text in corpus
         ]
-    
-    dictionary = Dictionary(text)
+    if not dictionary:
+        dictionary = Dictionary(text)
 
-    dictionary.add_documents([model.word_list])
-    
-    topics = model.get_topic_words(topn)
+    if not topics:
+        topics = model.get_topic_words(topn)
+
+    word_list = [topic for window in topics for topic in window]
+    dictionary.add_documents(word_list)
+
     num_windows = len(topics)
     coherences = {}
     for window in range(num_windows):
         try:
             coherence_model = CoherenceModel(topics=topics[window], texts=text, coherence=coherence_measure, topn=topn, dictionary=dictionary, **args)
             coherences[window] = coherence_model.get_coherence().item()
-        except:
-            raise Exception(f'Error in coherence calculation in window {window}')
+        except Exception as e:
+            print(f"Error in coherence calculation in window {window}")
+            raise e
     return (np.mean(list(coherences.values())).item(), coherences)
 
 def evaluate_topic_diversity(model, divergence_measure, topn=10, **args):
