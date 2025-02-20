@@ -104,8 +104,13 @@ class cETM(AbstractDETM):
         
     def represent_time(self, time):
         return (time - self.min_time) / (self.max_time - self.min_time)
+    
+    def evenly_spaced_times(self):
+        return numpy.linspace(self.min_time, self.max_time, self.num_windows)
 
-    def topic_embeddings(self, document_times):
+    def topic_representations(self, document_times):
+        if document_times is None:
+            document_times = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
         document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
         time_diff = document_times[1:] - document_times[:-1]
@@ -135,7 +140,9 @@ class cETM(AbstractDETM):
         kl_alpha = self.get_kl(mu_q_alpha, logsigma_q_alpha, mu_p, logsigma_p)
         return alphas, kl_alpha.sum().sum()
 
-    def document_topic_mixture_priors(self, document_times):
+    def topic_mixture_priors(self, document_times):
+        if document_times is None:
+            document_times = torch.tensor([self.represent_time(t) for t in self.evenly_spaced_times()])
         document_times = document_times.to(torch.float32)
         num_times = document_times.size(0)
         time_diff = document_times[1:] - document_times[:-1]
@@ -167,4 +174,4 @@ class cETM(AbstractDETM):
     
     def prepare_for_data(self, document_word_counts, document_times, batch_size=1024):
         self.num_docs = len(document_word_counts)
-        self.num_windows = self.num_docs
+        self.num_windows = len(set(document_times))
