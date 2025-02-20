@@ -36,7 +36,7 @@ def get_topic_coherence(beta, data):
     TC = []
     num_topics = len(beta)
     for k in range(num_topics):
-        print('k: {}/{}'.format(k, num_topics))
+        #print('k: {}/{}'.format(k, num_topics))
         top_10 = list(beta[k].argsort()[-11:][::-1])
         #top_words = [vocab[a] for a in top_10]
         TC_k = 0
@@ -61,10 +61,10 @@ def get_topic_coherence(beta, data):
             # update TC_k
             TC_k += tmp 
         TC.append(TC_k/counter)
-    print('counter: ', counter)
-    print('num topics: ', len(TC))
+    #print('counter: ', counter)
+    #print('num topics: ', len(TC))
     TC = np.mean(TC)
-    print('Topic Coherence is: {}'.format(TC))
+    #print('Topic Coherence is: {}'.format(TC))
     return TC, counter
 
 def _diversity_helper(beta, num_tops, model):
@@ -86,20 +86,20 @@ def original_detm_evaluation(model, dataset):
     with torch.no_grad():
         beta = model.topic_distributions()
         beta = beta.transpose(0, 1)
-        print('beta: ', beta.size())
+        #print('beta: ', beta.size())
 
-        print('\n')
-        print('#'*100)
-        print('Get topic diversity...')
+        #print('\n')
+        #print('#'*100)
+        #print('Get topic diversity...')
         num_tops = 25
         TD_all = np.zeros((model.num_windows,))
         for tt in range(model.num_windows):
             TD_all[tt] = _diversity_helper(beta[:, tt, :], num_tops, model)
         TD = np.mean(TD_all)
-        print('Topic Diversity is: {}'.format(TD))
+        #print('Topic Diversity is: {}'.format(TD))
 
-        print('\n')
-        print('Get topic coherence...')
+        #print('\n')
+        #print('Get topic coherence...')
         #print('train_tokens: ', train_tokens[0])
         TC_all = []
         cnt_all = []
@@ -107,14 +107,14 @@ def original_detm_evaluation(model, dataset):
             tc, cnt = get_topic_coherence(beta[:, tt, :].cpu().numpy(), dataset)
             TC_all.append(tc)
             cnt_all.append(cnt)
-        print('TC_all: ', TC_all)
+        #print('TC_all: ', TC_all)
         TC_all = TC_all
-        print('TC_all: ', torch.tensor(TC_all).size())
-        print('\n')
-        print('Get topic quality...')
+        #print('TC_all: ', torch.tensor(TC_all).size())
+        #print('\n')
+        #print('Get topic quality...')
         quality = [td*tc for td, tc in zip(TD_all, TC_all)]
-        print('Topic Quality is: {}'.format(quality))
-        print('#'*100)
+        #print('Topic Quality is: {}'.format(quality))
+        #print('#'*100)
     return TD_all, TC_all, quality
 
 
