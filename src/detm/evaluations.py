@@ -16,23 +16,14 @@ def get_document_frequency(data, wi, wj=None):
     if wj is None:
         D_wi = 0
         for l in range(len(data)):
-            doc = data[l].squeeze(0)
-            if len(doc) == 1: 
-                continue
-                #doc = [doc.squeeze()]
-            else:
-                doc = doc.squeeze()
+            doc = data[l]
             if wi in doc:
                 D_wi += 1
         return D_wi
     D_wj = 0
     D_wi_wj = 0
     for l in range(len(data)):
-        doc = data[l].squeeze(0)
-        if len(doc) == 1: 
-            doc = [doc.squeeze()]
-        else:
-            doc = doc.squeeze()
+        doc = data[l]
         if wj in doc:
             D_wj += 1
             if wi in doc:
@@ -69,10 +60,10 @@ def get_topic_coherence(beta, data):
                 counter += 1
             # update TC_k
             TC_k += tmp 
-        TC.append(TC_k)
+        TC.append(TC_k/counter)
     print('counter: ', counter)
     print('num topics: ', len(TC))
-    #TC = np.mean(TC) / counter
+    TC = np.mean(TC)
     print('Topic Coherence is: {}'.format(TC))
     return TC, counter
 
@@ -94,6 +85,7 @@ def original_detm_evaluation(model, dataset):
     model.eval()
     with torch.no_grad():
         beta = model.topic_distributions()
+        beta = beta.transpose(0, 1)
         print('beta: ', beta.size())
 
         print('\n')
@@ -116,14 +108,14 @@ def original_detm_evaluation(model, dataset):
             TC_all.append(tc)
             cnt_all.append(cnt)
         print('TC_all: ', TC_all)
-        TC_all = torch.tensor(TC_all)
-        print('TC_all: ', TC_all.size())
+        TC_all = TC_all
+        print('TC_all: ', torch.tensor(TC_all.size()))
         print('\n')
         print('Get topic quality...')
-        #quality = tc * diversity
-        quality = None
+        quality = np.mean(TC_all) / TD
         print('Topic Quality is: {}'.format(quality))
         print('#'*100)
+    return TD, TC_all, quality
 
 
 def evaluate_coherence(model, coherence_measure="c_v", topn=10, text=None, **args):
