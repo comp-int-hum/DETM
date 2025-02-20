@@ -112,10 +112,10 @@ def original_detm_evaluation(model, dataset):
         print('TC_all: ', torch.tensor(TC_all).size())
         print('\n')
         print('Get topic quality...')
-        quality = np.mean(TC_all) / TD
+        quality = [td*tc for td, tc in zip(TD_all, TC_all)]
         print('Topic Quality is: {}'.format(quality))
         print('#'*100)
-    return TD, TC_all, quality
+    return TD_all, TC_all, quality
 
 
 def evaluate_coherence(model=None, topics=None, coherence_measure="c_v", topn=10, text=None, dictionary=None, **args):
