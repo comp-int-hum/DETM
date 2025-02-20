@@ -5,6 +5,7 @@ import torch
 import numpy
 from torch import autograd
 import wandb
+from .evaluations import original_detm_evaluation
 
 
 logger = logging.getLogger("utils")
@@ -23,6 +24,8 @@ def train_model(
         val_proportion=0.2,
         detect_anomalies=False,
         use_wandb=False,
+        evaluate_while_training=False,
+        evaluation_epochs=5,
 ):
     #times = [model.represent_time(t) for t in times]
     model = model.to(device)
@@ -136,6 +139,28 @@ def train_model(
             batch_size,
             detect_anomalies=detect_anomalies
         )
+        if evaluate_while_training and epoch % evaluation_epochs == 0:
+            logger.info("Evaluating model...")
+            topic_diversities, topic_coherences, topic_qualities = original_detm_evaluation(
+                model,
+                val_subdocs, 
+                # TODO check with tom, in the original code the training set was used
+                # also the topic coherence is evaluated over the whole dataset, not the respective time slice
+            )
+            logger.info(
+                f"{epoch}: Topic diversities: {topic_diversities}, Topic coherences: {topic_coherences}, Topic qualities: {topic_qualities}"
+            )
+            if use_wandb:
+                wandb_dictionary = {}
+                for i, (diversity, coherence, quality) in enumerate(zip(topic_diversities, topic_coherences, topic_qualities)):
+                    wandb_dictionary[f"window_{i}/diversity"] = diversity
+                    wandb_dictionary[f"window_{i}/coherence"] = coherence
+                    wandb_dictionary[f"window_{i}/quality"] = quality
+                #wandb_dictionary["epoch"] = epoch
+                wandb.log(
+                    wandb_dictionary
+                )
+            logger.info("Evaluation complete.")
         logger.info(
             '{}: LR: {}, Train loss per word: mix_prior={:.2f}, mix={:.2f}, embs={:.2f}, recon={:.2f}, NELBO={:.2f} Val ppl per word: {:.2f}'.format(
                 epoch,
