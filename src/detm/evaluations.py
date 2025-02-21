@@ -92,7 +92,7 @@ def original_detm_evaluation(model, dataset):
         #print('#'*100)
         #print('Get topic diversity...')
         num_tops = 25
-        TD_all = np.zeros((model.num_windows,))
+        TD_all = [0] * model.num_windows
         for tt in range(model.num_windows):
             TD_all[tt] = _diversity_helper(beta[:, tt, :], num_tops, model)
         TD = np.mean(TD_all)
@@ -105,7 +105,7 @@ def original_detm_evaluation(model, dataset):
         cnt_all = []
         for tt in range(model.num_windows):
             tc, cnt = get_topic_coherence(beta[:, tt, :].cpu().numpy(), dataset)
-            TC_all.append(tc)
+            TC_all.append(tc.item())
             cnt_all.append(cnt)
         #print('TC_all: ', TC_all)
         TC_all = TC_all
@@ -132,7 +132,7 @@ def evaluate_coherence(model=None, topics=None, coherence_measure="c_v", topn=10
     -------
     coherence : float, dict mean coherence, coherence per window { window_index : coherence }
     """
-    assert coherence_measure in ['c_v', 'c_uci', 'c_npmi', 'u_mass'], 'coherence measure not recognized'
+    assert coherence_measure in ['c_v', 'c_uci', 'c_npmi', 'u_mass', 'c_w2v'], 'coherence measure not recognized'
     assert model is not None or topics is not None, 'model or topics must be provided'
 
     if text is None:
