@@ -9,7 +9,24 @@ from .word_embeddings_rbo import word_embeddings_rbo
 from gensim.corpora.dictionary import Dictionary
 from gensim.parsing.preprocessing import preprocess_string
 import torch
+import random
 
+
+def random_pairs(n, k):
+    """
+    Randomly sample k distinct unordered pairs (i, j), i < j,
+    from the range 0..n-1. 
+    """
+    pairs = set()
+    while len(pairs) < k:
+        i = random.randrange(n)
+        j = random.randrange(n)
+        if i != j:
+            # Order them so (i,j) = (min, max)
+            if j < i:
+                i, j = j, i
+            pairs.add((i, j))
+    return list(pairs)
 
 
 def get_document_frequency(data, wi, wj=None):
@@ -226,7 +243,7 @@ def proportion_unique_words(topics, topk=10):
         return puw
 
 
-def irbo(topics, weight=0.9, topk=10):
+def irbo(topics, weight=0.9, topk=10, sample=10000):
     """
     compute the inverted rank-biased overlap
 
@@ -239,6 +256,8 @@ def irbo(topics, weight=0.9, topk=10):
         to average overlap.
     topk: top k words on which the topic diversity
           will be computed
+    sample: number of samples to take from the
+            rank-biased overlap
 
     Returns
     -------
@@ -247,8 +266,15 @@ def irbo(topics, weight=0.9, topk=10):
     if topk > len(topics[0]):
         raise Exception('Words in topics are less than topk')
     else:
+        num_topics = len(topics)
+        num_combinations = (num_topics * (num_topics-1))/2
+        if num_combinations > sample:
+            pair_idxs = random_pairs(num_topics, sample)
+            pairs = [(topics[i], topics[j]) for i, j in pair_idxs]
+        else:
+            pairs = combinations(topics, 2)
         collect = []
-        for list1, list2 in combinations(topics, 2):
+        for list1, list2 in pairs:
             word2index = get_word2index(list1, list2)
             indexed_list1 = [word2index[word] for word in list1]
             indexed_list2 = [word2index[word] for word in list2]
@@ -257,7 +283,7 @@ def irbo(topics, weight=0.9, topk=10):
         return 1 - np.mean(collect)
 
 
-def word_embedding_irbo(topics, word_embedding_model, weight=0.9, topk=10):
+def word_embedding_irbo(topics, word_embedding_model, weight=0.9, topk=10, sample=10000):
     '''
     compute the word embedding-based inverted rank-biased overlap
 
@@ -274,8 +300,15 @@ def word_embedding_irbo(topics, word_embedding_model, weight=0.9, topk=10):
     if topk > len(topics[0]):
         raise Exception('Words in topics are less than topk')
     else:
+        num_topics = len(topics)
+        num_combinations = (num_topics * (num_topics-1))/2
+        if num_combinations > sample:
+            pair_idxs = random_pairs(num_topics, sample)
+            pairs = [(topics[i], topics[j]) for i, j in pair_idxs]
+        else:
+            pairs = combinations(topics, 2)
         collect = []
-        for list1, list2 in combinations(topics, 2):
+        for list1, list2 in pairs:
             word2index = get_word2index(list1, list2)
             index2word = {v: k for k, v in word2index.items()}
             indexed_list1 = [word2index[word] for word in list1]
@@ -286,7 +319,7 @@ def word_embedding_irbo(topics, word_embedding_model, weight=0.9, topk=10):
         return 1 - np.mean(collect)
 
 
-def pairwise_jaccard_diversity(topics, topk=10):
+def pairwise_jaccard_diversity(topics, topk=10, sample=10000):
     '''
     compute the average pairwise jaccard distance between the topics 
   
@@ -302,14 +335,21 @@ def pairwise_jaccard_diversity(topics, topk=10):
     '''
     dist = 0
     count = 0
-    for list1, list2 in combinations(topics, 2):
+    num_topics = len(topics)
+    num_combinations = (num_topics * (num_topics-1))/2
+    if num_combinations > sample:
+        pair_idxs = random_pairs(num_topics, sample)
+        pairs = [(topics[i], topics[j]) for i, j in pair_idxs]
+    else:
+        pairs = combinations(topics, 2)
+    for list1, list2 in pairs:
         js = 1 - len(set(list1).intersection(set(list2)))/len(set(list1).union(set(list2)))
         dist = dist + js
         count = count + 1
     return dist/count
 
 
-def pairwise_word_embedding_distance(topics, word_embedding_model, topk=10):
+def pairwise_word_embedding_distance(topics, word_embedding_model, topk=10, sample=10000):
     """
     :param topk: how many most likely words to consider in the evaluation
     :return: topic coherence computed on the word embeddings similarities
@@ -319,7 +359,14 @@ def pairwise_word_embedding_distance(topics, word_embedding_model, topk=10):
     else:
         count = 0
         sum_dist = 0
-        for list1, list2 in combinations(topics, 2):
+        num_topics = len(topics)
+        num_combinations = (num_topics * (num_topics-1))/2
+        if num_combinations > sample:
+            pair_idxs = random_pairs(num_topics, sample)
+            pairs = [(topics[i], topics[j]) for i, j in pair_idxs]
+        else:
+            pairs = combinations(topics, 2)
+        for list1, list2 in pairs:
             count = count+1
             word_counts = 0
             dist = 0
@@ -333,7 +380,7 @@ def pairwise_word_embedding_distance(topics, word_embedding_model, topk=10):
         return sum_dist/count
 
 
-def centroid_distance(topics, word_embedding_model, topk=10):
+def centroid_distance(topics, word_embedding_model, topk=10, sample=10000):
     """
     :param topk: how many most likely words to consider in the evaluation
     :return: topic coherence computed on the word embeddings similarities
@@ -342,7 +389,14 @@ def centroid_distance(topics, word_embedding_model, topk=10):
         raise Exception('Words in topics are less than topk')
     else:
         count = 0
-        for list1, list2 in combinations(topics, 2):
+        num_topics = len(topics)
+        num_combinations = (num_topics * (num_topics-1))/2
+        if num_combinations > sample:
+            pair_idxs = random_pairs(num_topics, sample)
+            pairs = [(topics[i], topics[j]) for i, j in pair_idxs]
+        else:
+            pairs = combinations(topics, 2)
+        for list1, list2 in pairs:
             count = count + 1
             centroid1 = np.zeros(word_embedding_model.vector_size)
             centroid2 = np.zeros(word_embedding_model.vector_size)
