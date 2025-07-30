@@ -19,10 +19,11 @@ class Corpus(list):
     ):
         subdocs = []
         times = []
+        indices = []
         word_to_index = {w : i for i, w in enumerate(model.word_list)}
         dropped_because_empty = 0
         dropped_because_timeless = 0
-        for doc in self:
+        for i, doc in enumerate(self):
             if time_field != None:
                 time = doc.get(time_field, None)
                 if time != None and not numpy.isnan(time):
@@ -39,9 +40,10 @@ class Corpus(list):
                 if len(subdoc) > 0:
                     subdocs.append(subdoc)
                     times.append(time)
+                    indices.append(i)
                 else:
                     dropped_because_empty += 1
-        return (subdocs, times)
+        return (subdocs, times, indices)
 
     def get_tokenized_subdocs(
             self,

@@ -20,7 +20,7 @@ def train_model(
         lr_factor=2.0,
         batch_size=32,
         device="cpu",
-        val_proportion=0.2,
+        val_proportion=0.1,
         detect_anomalies=False,
         use_wandb=False
 ):
@@ -42,7 +42,7 @@ def train_model(
     best_val_ppl = float("inf")
     since_annealing = 0
     since_improvement = 0
-    
+    nan_reduce = 0
     
     for epoch in range(1, max_epochs + 1):
         logger.info("Starting epoch %d", epoch)
@@ -158,6 +158,9 @@ def train_model(
         #    wandb.log({
         #        "val/ppl": val_ppl
         #    })
+        for i in range(nan_reduce):
+            optimizer.param_groups[0]['lr'] *= lr_factor
+        nan_reduce = 0
 
         if val_ppl < best_val_ppl:
             logger.info("Copying new best model...")
@@ -178,6 +181,7 @@ def train_model(
             optimizer.load_state_dict(best_optimizer_state)
             model.load_state_dict(best_state)
             optimizer.param_groups[0]['lr'] /= lr_factor
+            nan_reduce += 1
         elif since_improvement >= 10:
             break
 
@@ -200,11 +204,13 @@ def apply_model(
 
     ppl = 0
     cnt = 0
-    indices = torch.randperm(len(subdocs))
+    indices = torch.arange(len(subdocs))
     indices = torch.split(indices, batch_size)
     word_count = 0
-    
+    priors = []
+    mixtures = []
     for idx, ind in enumerate(indices):
+
         actual_batch_size = len(ind)
         data_batch = numpy.zeros((actual_batch_size, model.vocab_size))
         times_batch = numpy.zeros((actual_batch_size, ))
@@ -220,15 +226,17 @@ def apply_model(
         times_batch = torch.from_numpy(times_batch)
         sums = data_batch.sum(1).unsqueeze(1)
         with autograd.set_detect_anomaly(detect_anomalies):
-            loss, nll, kl_alpha, kl_eta, kl_theta = model(
+            loss, nll, kl_alpha, kl_eta, kl_theta, topic_mixture_priors, document_topic_mixtures, topic_distributions = model(
                 data_batch,
                 times_batch,
             )
-
+            priors = topic_mixture_priors.to("cpu").detach()
+            topics = topic_distributions.to("cpu").detach()
+            mixtures.append(document_topic_mixtures.to("cpu").detach())
             ppl += torch.sum(nll).item()
             cnt += data_batch.shape[0]
 
-    return (), ppl / word_count
+    return (priors, topics, mixtures), ppl / word_count
 
 # from sklearn.manifold import TSNE
 # import torch 

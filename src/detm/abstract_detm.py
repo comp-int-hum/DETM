@@ -143,7 +143,10 @@ class AbstractDETM(torch.nn.Module, ABC):
             document_word_counts
         )
         nelbo = self.combine_losses(reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
-        return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
+        if self.training:
+            return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld)
+        else:
+            return (nelbo, reconstruction_loss, topic_representations_kld, topic_mixture_priors_kld, document_topic_mixtures_kld, topic_mixture_priors, document_topic_mixtures, topic_distributions)
     
     @property
     def vocab_size(self):
