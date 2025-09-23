@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block navigation %}
+<a href="/">Navigator</a> > <a href="/topics">Topics</a> > {{ topic_id }}
+{% endblock %}
+
+{% block content %}
+
+<h2>Topic {{ topic_id + 1}}</h2>
+
+<table>
+  <tr><th>Weight</th><th>Window</th><th>Top words</th></tr>
+  {% for window_weight in topics['window_weights'][topic_id] %}
+  <tr>
+    <td>{{ window_weight|round(3) }}</td>
+    <td><a href="/windows/{{ loop.index0 }}">{{ cube.index_to_window[loop.index0] }}</a></td>
+    <td>
+      {% set outer_loop = loop %}
+      {% set window_id = loop.index0 %}
+      {% for rank in range(num_top_words) %}
+      {% set word_id = topics.window_top_words[topic_id][outer_loop.index0][rank] %}
+      {{ cube.index_to_word[word_id] }}
+      {% endfor %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% endblock %}

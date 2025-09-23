@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block navigation %}
+<a href="/">Navigator</a> > Topics
+{% endblock %}
+
+{% block content %}
+
+<table>
+  <tr>
+    <th>ID</th>
+    <th>Top words</th>
+    {% for metric in topics['metrics'] %}
+    <th>{{ metric }}</th>
+    {% endfor %}
+    {% for ann in topics['annotations'] %}
+    <th>{{ ann }}</th>
+    {% endfor %}
+    <th><input name="annotator_name" id="annotator_name" /></th>
+  </tr>
+  {% for topic_id in topics['ids'] %}
+  <tr>
+    <td>
+      <a href="/topics/{{ topic_id }}">
+	{{ topic_id + 1 }}
+      </a>
+    </td>
+    <td align="center">
+      {% for i in range(num_top_words) %}
+      <a href="/words/{{ topics['top_words'][topic_id][i][0] }}">
+	{{ topics['top_words'][topic_id][i][1] }}	
+      </a>
+      {% endfor %}
+    </td>
+    {% for metric in topics['metrics'] %}
+    <td>{{ topics['metrics'][metric][topic_id] }}</td>
+    {% endfor %}
+    {% for ann in topics['annotations'] %}
+    <td>
+      {{ topics['annotations'][ann][topic_id] }}
+    </td>
+    {% endfor %}
+    <td><input id="label_{{ topic_id }}" name="label_{{ topic_id }}" /></td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% endblock %}

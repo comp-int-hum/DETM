@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block navigation %}
+<a href="/">Navigator</a> > Documents
+{% endblock %}
+
+{% block content %}
+
+<table>
+  {% for doc in documents %}
+  <tr><td><a href="/documents/{{ loop.index0 }}">{{ doc.fullText | sum(start=[]) | join(' ') | truncate(100) }}</a></td></tr>
+  {% endfor %}
+</table>
+
+{% endblock %}

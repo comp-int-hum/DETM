@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block head %}
+<title>Inspector</title>
+{% endblock %}
+
+{% block navigation %}
+Navigator
+{% endblock %}
+
+{% block content %}
+
+{% if model != None %}
+<h3>Diachronic topic model with {{ model.num_topics }} topics and {{ model.num_windows }} windows covering years {{ model.min_time | int }} to {{ model.max_time | int }}</h3>
+{% endif %}
+
+{% if embeddings %}
+<h3>Embeddings of dimension {{ model.embedding_size }} over {{ model.vocab_size }} unique words</h3>
+{% endif %}
+
+{% if documents %}
+<h3>Corpus of {{ documents | length }} documents</h3>
+{% endif %}
+
+<ul>
+  {% if model != None %}
+  <li><a href="/model">Model</a></li>
+  {% endif %}
+  <li><a href="/topics">Topics</a></li>
+  <li><a href="/windows">Windows</a></li>
+  <li><a href="/words">Words</a></li>
+  {% if documents != None %}
+  <li><a href="/documents">Documents</a></li>
+  {% endif %}
+</ul>
+
+{% endblock %}
+
