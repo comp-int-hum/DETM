@@ -2,6 +2,8 @@
 
 This repository is derived from [the Blei lab's DETM code base](https://github.com/adjidieng/DETM) to serve as a centralized, pip-installable workspace for our use and development of this model-family in the computational humanities.  
 
+## Installation
+
 This package can be installed from git:
 
 ```bash
@@ -24,7 +26,9 @@ cd /path/to/project/using/detm
 pip install -e /path/back/to/DETM
 ```
 
-If you have gzipped JSONL data where each line/object is a document with a text field "content" and time field "year", you can use the library somewhat like this:
+## Simple use
+
+If you have gzipped JSONL data where each line/object is a document with a text field "content" and time field "year", you can use the library in code somewhat like this:
 
 ```python
 import torch
@@ -94,6 +98,18 @@ print(test_perplexity)
 ```
 
 Of course, with an unsupervised model, it may make sense to simply apply it back to the training data.
+
+## Server
+
+The module can also be invoked from the command line to start a simple local web interface for inspecting a trained model along with data and optional lightweight annotations:
+
+```
+python -m detm.server -h
+```
+
+This aspect is *very* preliminary and subject to rapid change: currently it is not well-documented or particularly ergonomic!
+
+## Citing the original ML research
 
 Everything up to the point of our initial fork should be attributed to:
 

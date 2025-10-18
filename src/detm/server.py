@@ -48,10 +48,6 @@ def preprocess(cube, annotations):
     stem_to_word_indices = {}
     for index, word in cube["index_to_word"].items():
         nw = normalize(word)
-        #if args.stop and ((not args.language and nw in default_stops) or nw in stops.get(args.language, [])):
-        #    continue
-        #stem = word if not args.stem else default_stemmer.stem(nw) if args.language not in stemmers else
-        #stem = stemmers[args.language].lemmatize([nw])[0][1]
         stem_to_word_indices[nw] = stem_to_word_indices.get(nw, [])
         stem_to_word_indices[nw].append(index)
     stem_to_index = {stem : i for i, stem in enumerate(stem_to_word_indices.keys())}
@@ -68,7 +64,6 @@ def preprocess(cube, annotations):
     P_sbt = torch.zeros(size=(len(stem_to_index), P_wbt.shape[1], P_wbt.shape[2]))
 
     for stem, i in stem_to_index.items():
-        #ptbs[:, :, i] = ptbw[:, :, stem_to_word_indices[stem]].sum(2)
         P_sbt[i, :, :] = P_wbt[stem_to_word_indices[stem], :, :].sum(0)
 
     # this isn't normalized
@@ -97,13 +92,6 @@ def preprocess(cube, annotations):
             topic_table["annotations"][ann["annotator"]] = topic_table["annotations"].get(ann["annotator"], {})
             topic_table["annotations"][ann["annotator"]][ann["topic_id"]] = ann["label"]
 
-        #print(topic)
-        #for bid in range(pwbt.shape[1]):
-        #    topic[cube["index_to_window"][bid]] = ptb[tid][bid].item()
-
-        #topic_table.append(topic_w)
-        #topic_glosses.append(topic_g)
-    #topic_table["words"] = topic_words
     return topic_table, word_table, document_table, window_table
 
     
@@ -138,6 +126,7 @@ if __name__ == "__main__":
     parser.add_argument("--title_field", dest="title_field", default="title", help="Document field containing the title")
     parser.add_argument("--author_field", dest="author_field", default="author", help="Document field containing the author")
     parser.add_argument("--metadata_fields", dest="metadata_fields", nargs="*", default=[], help="Additional document metadata fields to consider")
+    parser.add_argument("--port", dest="port", default=8080, type=int)
     args = parser.parse_args()
 
     trained_model = None
@@ -229,9 +218,7 @@ if __name__ == "__main__":
                 if token in word_to_index:
                     data_batch[0, word_to_index[token]] += 1
             (_, _, _, _, _, topic_mixture_priors, document_topic_mixtures, topic_distributions) = trained_model(data_batch, times_batch)
-            print(document_topic_mixtures)
             rel = topic_distributions[window]
-            
             return render_template("model.html", model=trained_model, embeddings=embeddings)
         else:
             return render_template("model.html", model=trained_model, embeddings=embeddings)
